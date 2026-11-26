@@ -104,7 +104,8 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   const pick = (settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[]) => settled.flatMap((r) => (r.status === "fulfilled" ? [{ kit: clean(r.value.kit, spec, /skeleton/.test(r.value.promptVersion) ? new Set(skelCovered) : undefined).kit, promptVersion: r.value.promptVersion }] : []));
   // Skeleton first: the layout of every sample post is already measured exactly from the PDF, so templates are BUILT from it for free.
   // The model is only asked for what geometry cannot give (decoration; templates that have no sample post to measure).
-  const skel = stored || process.env.KIT_SKELETON === "0" ? null : await skeletonKit(spec, (id) => geoBy.get(id), logoBox && logoFurn ? { what: logoFurn.what, box: logoBox } : null).catch((e) => { warnings.push(`Skeleton skipped (${String(e.message).slice(0, 100)})`); return null; });
+  const skel = stored || process.env.KIT_SKELETON !== "1" ? null : // OFF by default: live runs showed the model-built kits look better (decoration, paper, stamps) than the skeleton, whatever the measured score says
+     await skeletonKit(spec, (id) => geoBy.get(id), logoBox && logoFurn ? { what: logoFurn.what, box: logoBox } : null).catch((e) => { warnings.push(`Skeleton skipped (${String(e.message).slice(0, 100)})`); return null; });
   const skelUsable = !!skel && skel.covered.length > 0;
   if (skel) skelCovered.push(...skel.covered);
   if (skel && process.env.SKEL_DEBUG) console.error("skeleton", JSON.stringify({ covered: skel.covered, missing: skel.missing, notes: skel.notes }));

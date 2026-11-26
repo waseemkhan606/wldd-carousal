@@ -184,7 +184,7 @@ type Placed = { top: number; left: number; width: number; height: number; css: s
 /** Absolute box + typography for a block (shared by slots, furniture and static text). */
 function boxCss(b: SkBlock, spec: StyleSpec, bgHex: string): string {
   const multi = b.lines.length > 1, pitch = b.pitch || b.px * 1.12, lh = b.pitch ? b.pitch / b.px : 1.12;
-  const top = b.lines[0].y + b.lines[0].h / 2 - pitch / 2, slack = multi ? Math.max(b.px * 0.6, b.w * 0.06) : b.px * 0.6;
+  let top = b.lines[0].y + b.lines[0].h / 2 - pitch / 2; const slack = multi ? Math.max(b.px * 0.6, b.w * 0.06) : b.px * 0.6;
   let left = b.x, width = b.w + slack;
   if (b.align === "center") left = b.x - slack / 2; else if (b.align === "right") left = b.x - slack;
   if (!multi && b.align === "left") width = Math.max(width, 1080 - 60 - b.x);
@@ -193,7 +193,7 @@ function boxCss(b: SkBlock, spec: StyleSpec, bgHex: string): string {
   // the spec's safe margins hold for every slot and furniture box (a tilted stamp is positioned by its centre and left alone)
   if (!b.rotationDeg) {
     const m = spec.layout.margins_px, mg = typeof m === "number" ? { top: m, right: m, bottom: m, left: m } : m;
-    left = Math.max(left, mg.left); width = Math.max(Math.min(width, 1080 - mg.right - left), Math.min(b.w, 1080 - mg.right - left));
+    top = Math.max(top, mg.top); left = Math.max(left, mg.left); width = Math.max(Math.min(width, 1080 - mg.right - left), Math.min(b.w, 1080 - mg.right - left));
   }
   const fr = fontRole(b.font, spec), bgc = nearestColor(b.boxed?.fill ?? bgHex, spec), fit = bestInk(b.visible ?? b.color, b.color, bgc.hex, spec);
   const wt = b.weight && fr.weights.length ? fr.weights.reduce((p, q) => (Math.abs(q - b.weight!) < Math.abs(p - b.weight!) ? q : p)) : undefined; // only a weight the brand font really has
@@ -216,6 +216,7 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
   const used = new Set<SkBlock>();
   // furniture first: each spec item is placed from the matching block, else at its stated corner
   const minPx = Math.min(...free.map((b) => b.px), 24);
+  const isCounterSlot = (n: string) => /counter|slide[-_ ]?(no|num)|pagination|page[-_ ]?num/i.test(n), counterSlot = a.slots.some((x) => isCounterSlot(x.name)); // some specs make the counter a slot, not furniture
   for (const f of spec.layout.fixed_furniture) {
     const kind = furnKind(f.what), pos = corner(f.position);
     const text = kind === "counter" ? "{{idx}} / {{total}}" : kind === "handle" ? "{{handle}}" : kind === "brand" ? "{{brand}}" : undefined;
@@ -226,7 +227,7 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
     }
     const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
     const cand = free.filter((b) => !used.has(b) && !b.boxed).filter((b) => kind === "counter" ? /^\d{1,2}\s*[/·]\s*\d{1,2}$/.test(b.text.trim()) : kind === "handle" ? /^@/.test(b.text.trim()) || (!!spec.brand.handle && norm(b.text) === norm(spec.brand.handle)) : kind === "brand" ? norm(b.text) === norm(spec.brand.name) || (b.role.static === true && b.px <= minPx * 1.4) : (b.role.static === true && Math.abs(b.y - (pos.bottom ? 1250 : 90)) < 160 && (pos.right ? b.x > 540 : b.x < 540)));
-    const b = cand[0];
+    const b = kind === "counter" && counterSlot ? undefined : cand[0]; // the slot owns the counter; the furniture item stays hidden
     if (b) {
       used.add(b);
       parts.push(`<div data-furniture="${f.what}" style="${boxCss(b, spec, bgHex)}white-space:nowrap">${text ?? esc(b.text)}</div>`);
@@ -240,13 +241,15 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
   // an option letter (A, B, C...) is a label, not an answer: boxed, at most 2 characters and much smaller than the boxed answers
   const boxedMax = Math.max(...free.filter((b) => b.boxed).map((b) => b.px), 0), isMarker = (b: SkBlock) => !!b.boxed && b.text.trim().length <= 2 && b.px <= 0.6 * boxedMax;
   // slots: pair slots with blocks of the same kind, in reading order
-  const cand = free.filter((b) => !used.has(b) && !b.role.furniture && !isMarker(b) && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
+  const cand = free.filter((b) => !used.has(b) && (!b.role.furniture || counterSlot) && !isMarker(b) && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
   const pairs: { s: number; b: number; score: number }[] = [];
   const byY = [...cand].sort((x, y) => x.y - y.y || x.x - y.x), cls = classes(byY), blockClass = (b: SkBlock) => cls.get(b) ?? "body";
   a.slots.forEach((s, si) => {
     const sc = slotClass(s); const sRank = a.slots.filter((o, oi) => oi < si && slotClass(o) === sc).length;
     byY.forEach((b, bi) => {
-      const bc = blockClass(b); const base = COMPAT[sc][bc] ?? 0; if (!base) return;
+      const bc = blockClass(b); let base = COMPAT[sc][bc] ?? 0;
+      if (b.role.furniture) base = isCounterSlot(s.name) ? 20 : 0; else if (isCounterSlot(s.name)) base = 0; // the page counter pairs only with a counter slot
+      if (!base) return;
       const bRank = byY.filter((o, oi) => oi < bi && blockClass(o) === bc).length;
       const words = b.text.split(/\s+/).length, fit = words <= s.max_words * 1.3 ? 1.5 : -3;
       pairs.push({ s: si, b: bi, score: base + fit - Math.abs(bRank - sRank) * 0.7 });

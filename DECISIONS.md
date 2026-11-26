@@ -110,3 +110,6 @@
 - Templates built this way, and templates edited by instruction, are exempt from the positional polish (balance, clearance, row/column alignment): the look book's own layout wins.
 - Measured with the real compile on the three sample look books (hand-written specs, stubbed model): final fidelity 94 / 91 / 90, zero layout model calls, zero render problems, also with 1.6x and 0.5x copy length.
 - Known limits: bold on variable fonts is not visible in the PDF's font names; the slide counter cannot be zero-padded ("02 / 05"); a spec slot with no counterpart in the sample is placed under the content; decoration needs the model.
+
+### Update: skeleton-first ingestion is OFF by default (`KIT_SKELETON=1` turns it on)
+Measured fidelity said the skeleton was better (89-94 offline), but live runs on Railway showed otherwise: the model-built kits looked clearly better (ruled paper, stamp frames, receipt edges, correct fonts), while skeleton kits came out plain and, after the aligner, with crushed letter-spacing. The measure rewards matching word positions and under-weights decoration, so it cannot be the deciding signal for this change. The code stays for experiments; the default path is the model-built kit again. Lesson: judge template changes by looking at the rendered slides, not by the score.
