@@ -14,7 +14,7 @@ import { alignArchetype, sanitizeHex, swapLogo, enforceFurniture, fixContrast, e
 const W0 = 1080;
 import { assertCredits } from "../llm/preflight";
 import { editedTemplates } from "./kitlog";
-import { polishStamps, enforceClearance, clearStaticText, floorTextSizes, addEdgeBands, harmoniseFurniture, enforceBackdropContrast, liftSlots, dedupeFurniture, nowrapPlaceholders, thickenRuledLines, rulerGrid, usesGrid, ruledLineHeights, snapToRuledGrid, leftAlignStray, anchorLeft, balanceVertical } from "./polish";
+import { polishStamps, enforceClearance, clearStaticText, hygieneExempt, hygieneType, alignRows, symmetricColumn, floorTextSizes, addEdgeBands, harmoniseFurniture, enforceBackdropContrast, liftSlots, dedupeFurniture, nowrapPlaceholders, thickenRuledLines, rulerGrid, usesGrid, ruledLineHeights, snapToRuledGrid, leftAlignStray, anchorLeft, balanceVertical } from "./polish";
 import { verticalLines, diffLines, verticalLineOverride, lineOpacity } from "./decor";
 import { renderSlide, type RenderDiag } from "../render/renderer";
 import { lookbookCost } from "../llm/usage";
@@ -245,11 +245,14 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     const mgL = (() => { const m = spec.layout.margins_px; return typeof m === "number" ? m : m.left; })();
     const before = best; // safety net: polish is kept per template only if it does not make that template worse
     // phase A: structural fixes that change text flow, then re-render so phase B measures the real result
+    const exempt = hygieneExempt(spec); // what the look book itself states about alignment, size and spacing wins over the hygiene defaults
     const A: KitOutput = JSON.parse(JSON.stringify(best.kit)); let na = 0; const stray: Record<string, string[]> = {};
     const eb = addEdgeBands(A.archetypes, A.css, spec); A.css = eb.css; na += eb.changes.length; for (const c of eb.changes) alignLog.push(`coherence ${c}`);
     const hf = harmoniseFurniture(A.archetypes, A.css); na += hf.length; for (const c of hf) alignLog.push(`coherence ${c}`);
     const th = thickenRuledLines(A.css); A.css = th.css; na += th.changed; if (th.changed) alignLog.push(`polish: ${th.changed} ruled-line gradient(s) thickened to 2px`);
-    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r) continue; if (geoFor(spec.archetypes.find((x) => x.id === a.id)!)) continue; /* sampled templates keep their measured alignment */ const o = leftAlignStray(a.html, r.diag, kindsOf(a.id)); a.html = o.html; if (o.slots.length) { stray[a.id] = o.slots; na += o.slots.length; alignLog.push(`polish ${a.id}: left-aligned ${o.slots.join(", ")}`); } }
+    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r) continue; if (exempt.align || geoFor(spec.archetypes.find((x) => x.id === a.id)!)) continue; /* sampled templates keep their measured alignment; a stated alignment rule is respected */ const o = leftAlignStray(a.html, r.diag, kindsOf(a.id)); a.html = o.html; if (o.slots.length) { stray[a.id] = o.slots; na += o.slots.length; alignLog.push(`polish ${a.id}: left-aligned ${o.slots.join(", ")}`); } }
+    { const proxies = A.archetypes.map((a) => ({ id: a.id, html: a.html, isCover: /cover/i.test(a.id) || (!!spec.lookbook?.coverPage && spec.archetypes.find((x) => x.id === a.id)?.source_page === spec.lookbook.coverPage) }));
+      const ch = hygieneType(proxies, kindsOf, exempt); proxies.forEach((p, i) => { A.archetypes[i].html = p.html; }); na += ch.length; if (ch.length) alignLog.push(`hygiene: ${ch.join("; ")}`); }
     for (const a of A.archetypes) { const f = floorTextSizes(a.html, kindsOf(a.id)); a.html = f.html; na += f.changes.length; if (f.changes.length) alignLog.push(`polish ${a.id}: ${f.changes.join(', ')}`); }
     const grid = rulerGrid(A.css);
     for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r || !usesGrid(a.html, grid)) continue; const o = ruledLineHeights(a.html, r.diag, kindsOf(a.id), grid); a.html = o.html; if (o.changes.length) { na += o.changes.length; alignLog.push(`coherence ${a.id} (ruled paper ${grid.pitch}px): ${o.changes.join(", ")}`); } }
@@ -263,12 +266,14 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       const o0 = anchorLeft(a.html, r.diag, stray[a.id] ?? [], left, kinds); a.html = o0.html;
       const o1 = enforceClearance(a.html, r.diag, spec, rules, kinds, stray[a.id] ?? []); a.html = o1.html;
       const o3 = clearStaticText(a.html, nk.css, spec, rules); a.html = o3.html;
+      const oR = alignRows(a.html, r.diag, kinds); a.html = oR.html;
+      const oS = !exempt.align && !geoFor(spec.archetypes.find((x) => x.id === a.id)!) ? symmetricColumn(a.html, r.diag, spec, kinds, left) : { html: a.html, changes: [] as string[] }; a.html = oS.html;
       const o5 = usesGrid(a.html, grid) ? snapToRuledGrid(a.html, r.diag, kinds, grid) : { html: a.html, changes: [] as string[] }; a.html = o5.html;
       const o4 = balanceVertical(a.html, r.diag, spec, kinds, usesGrid(a.html, grid) ? grid.pitch : 0); a.html = o4.html;
       const o2 = polishStamps(a.html, kinds); a.html = o2.html;
       const o6 = dedupeFurniture(a.html, r.diag, kinds); a.html = nowrapPlaceholders(liftSlots(o6.html, kinds));
       const o7 = await enforceBackdropContrast(a.html, r.png, r.diag, spec, kinds); a.html = o7.html;
-      const all = [...o0.changes, ...o1.changes, ...o3.changes, ...o5.changes, ...o4.changes, ...o2.changes, ...o6.changes, ...o7.changes]; n += all.length; if (all.length) alignLog.push(`polish ${a.id}: ${all.join(", ")}`);
+      const all = [...oR.changes, ...oS.changes, ...o0.changes, ...o1.changes, ...o3.changes, ...o5.changes, ...o4.changes, ...o2.changes, ...o6.changes, ...o7.changes]; n += all.length; if (all.length) alignLog.push(`polish ${a.id}: ${all.join(", ")}`);
     }
     if (n) {
       let e = await evalKit(nk); best = e.ev; manifest = e.m;

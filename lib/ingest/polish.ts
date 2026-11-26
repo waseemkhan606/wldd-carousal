@@ -349,3 +349,75 @@ export function floorTextSizes(html: string, kinds: Record<string, string>): { h
   }
   return { html, changes };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Template hygiene: the basics a designer would never skip, applied to every kit UNLESS the look book says otherwise.
+// ---------------------------------------------------------------------------------------------------------------
+export type Exempt = { align: boolean; size: boolean; padding: boolean };
+
+/** What the look book itself states about alignment, type size and spacing: stated rules beat these defaults. */
+export function hygieneExempt(spec: StyleSpec): Exempt {
+  const text = [...(spec.guidelines ?? []).map((g) => `${g.statement} ${g.quote}`), ...(spec.rules ?? []).map((r) => r.text), ...spec.elements.map((e) => `${e.description} ${e.placement}`), spec.voice?.summary ?? ""].join(" \n ").toLowerCase();
+  return {
+    align: /\bcent(?:er|re)d?\b|right[- ]aligned|justif|flush (?:left|right)|left[- ]aligned|text[- ]align|aligned (?:left|right|centre|center)/.test(text),
+    size: /(?:headline|title|cover|font|type)[^.\n]{0,40}\b\d{2,3}\s?(?:px|pt)\b|\b\d{2,3}\s?(?:px|pt)\b[^.\n]{0,40}(?:headline|title|cover|font|type)/.test(text),
+    padding: /\b(?:padding|margins?|gutter|safe zone)\b[^.\n]{0,30}\b\d{2,3}\s?(?:px|pt)\b|\b\d{2,3}\s?(?:px|pt)\b[^.\n]{0,30}\b(?:padding|margins?|gutter)\b/.test(text),
+  };
+}
+
+const num = (s: string | undefined) => (s === undefined ? NaN : Number(s));
+/** The designed (max) and smallest allowed size of a slot, read from its data attributes. */
+function sizesOf(html: string, name: string): { max: number; min: number } | null {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`data-slot=["']${esc}["'][^>]*?data-max-size="(\\d+)"[^>]*?data-min-size="(\\d+)"`).exec(html);
+  return m ? { max: num(m[1]), min: num(m[2]) } : null;
+}
+
+/**
+ * Type hierarchy: a cover headline is the biggest type in the carousel (never smaller than the inside slides' headlines), and display
+ * type may not collapse: a headline can shrink to 60% of its designed size at most, so a long cover is rewritten shorter, not shrunk to nothing.
+ */
+export function hygieneType(archetypes: { id: string; html: string; isCover: boolean }[], kindsOf: (id: string) => Record<string, string>, exempt: Exempt): string[] {
+  if (exempt.size) return [];
+  const changes: string[] = [], headSlot = (id: string) => Object.entries(kindsOf(id)).find(([, k]) => k === "headline")?.[0];
+  const inside = archetypes.filter((a) => !a.isCover).map((a) => { const n = headSlot(a.id); return n ? sizesOf(a.html, n)?.max ?? 0 : 0; });
+  const insideMax = Math.max(0, ...inside);
+  for (const a of archetypes) {
+    for (const [name, kind] of Object.entries(kindsOf(a.id))) {
+      if (kind !== "headline" && !(a.isCover && kind === "number")) continue;
+      const z = sizesOf(a.html, name); if (!z) continue;
+      let max = z.max, min = z.min;
+      if (a.isCover && insideMax && max < insideMax) max = Math.min(150, Math.round(insideMax * 1.15));
+      min = Math.max(min, Math.round(max * 0.6));
+      if (max !== z.max || min !== z.min) { a.html = editSlot(a.html, name, { style: max !== z.max ? { "font-size": `${max}px` } : {}, data: { "data-max-size": max, "data-min-size": min } }); changes.push(`${a.id}: ${name} type ${z.max}/${z.min} → ${max}/${min}px`); }
+    }
+  }
+  return changes;
+}
+
+/**
+ * Symmetry of rows: items that sit on the same row at the top or bottom of the slide (tag and slide counter, handle and logo) share one
+ * vertical centre, so a header or footer reads as one aligned line.
+ */
+export function alignRows(html: string, diag: RenderDiag, kinds: Record<string, string>): { html: string; changes: string[] } {
+  const changes: string[] = [], nest = nestedSlots(html);
+  const items: { name: string; cy: number }[] = [];
+  for (const [n, s] of Object.entries(diag.slots)) if (s.rect && s.rect.w >= 4 && ["tag", "counter"].includes(kinds[n] ?? "") && !nest.has(n)) items.push({ name: n, cy: s.rect.y + s.rect.h / 2 });
+  for (const [n, s] of Object.entries(diag.furnStats ?? {})) if (s.rect && s.rect.w >= 4 && !items.some((i) => i.name === n) && !/mark|seal|texture|edge|glow/i.test(n)) items.push({ name: n, cy: s.rect.y + s.rect.h / 2 });
+  for (const row of [items.filter((i) => i.cy < 230), items.filter((i) => i.cy > H - 230)]) {
+    if (row.length < 2) continue;
+    const ys = row.map((r) => r.cy).sort((a, b) => a - b), med = ys[Math.floor(ys.length / 2)];
+    for (const r of row) { const dy = Math.round(med - r.cy); if (Math.abs(dy) >= 3 && Math.abs(dy) <= 45) { html = editSlot(html, r.name, { addTranslate: [0, dy] }); changes.push(`${r.name}: aligned with its row (${dy}px)`); } }
+  }
+  return { html, changes };
+}
+
+/** Symmetric text column: in a template without a sample, running text spans the column between the margins (equal padding left and right). */
+export function symmetricColumn(html: string, diag: RenderDiag, spec: StyleSpec, kinds: Record<string, string>, left: number): { html: string; changes: string[] } {
+  const changes: string[] = [], m = spec.layout.margins_px, right = W - (typeof m === "number" ? m : m.right), col = right - left, nest = nestedSlots(html);
+  for (const [n, s] of Object.entries(diag.slots)) {
+    if (!["headline", "body", "title"].includes(kinds[n] ?? "") || nest.has(n) || !s.rect || !s.elW) continue;
+    if (s.elW < col * 0.85) { html = editSlot(html, n, { style: { width: `${Math.round(col)}px` } }); changes.push(`${n}: text column widened to the margins (${Math.round(s.elW)}→${Math.round(col)}px)`); }
+  }
+  return { html, changes };
+}

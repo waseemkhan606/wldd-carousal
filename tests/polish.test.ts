@@ -81,3 +81,32 @@ describe("text inside boxes stays with its box", () => {
     expect(addEdgeBands(arch, "", spec).changes.length).toBe(1);
   });
 });
+
+import { hygieneExempt, hygieneType, alignRows, symmetricColumn } from "@/lib/ingest/polish";
+describe("template hygiene", () => {
+  const spec = (texts: string[]): any => ({ guidelines: texts.map((t) => ({ statement: t, quote: t })), rules: [], elements: [], voice: { summary: "" }, layout: { margins_px: { top: 90, right: 90, bottom: 90, left: 90 } } });
+  it("is switched off only by what the look book states", () => {
+    expect(hygieneExempt(spec(["Headlines are centred on the page"])).align).toBe(true);
+    expect(hygieneExempt(spec(["Cover headline is 140px"])).size).toBe(true);
+    expect(hygieneExempt(spec(["Keep the voice calm"]))).toEqual({ align: false, size: false, padding: false });
+  });
+  it("makes the cover headline at least as big as the inside headlines, and stops display type collapsing", () => {
+    const cover = { id: "cover", isCover: true, html: '<div data-slot="headline" data-max-size="100" data-min-size="40"></div>' };
+    const inside = { id: "inside", isCover: false, html: '<div data-slot="headline" data-max-size="120" data-min-size="60"></div>' };
+    const kinds = () => ({ headline: "headline" });
+    hygieneType([cover, inside], kinds, { align: false, size: false, padding: false });
+    expect(cover.html).toMatch(/data-max-size="138"/); expect(cover.html).toMatch(/data-min-size="83"/);
+    const c2 = { id: "cover", isCover: true, html: '<div data-slot="headline" data-max-size="100" data-min-size="40"></div>' };
+    expect(hygieneType([c2], kinds, { align: false, size: true, padding: false })).toEqual([]);
+  });
+  it("puts tag and counter on one line", () => {
+    const diag: any = { slots: { tag: { rect: { x: 90, y: 100, w: 200, h: 24 } } }, furnStats: { "Slide counter": { rect: { x: 900, y: 118, w: 80, h: 24 } } } };
+    const r = alignRows('<div data-slot="tag"></div><div data-furniture="Slide counter"></div>', diag, { tag: "tag" });
+    expect(r.changes.length).toBe(1);
+  });
+  it("widens a narrow text column to the margins", () => {
+    const diag: any = { slots: { body: { rect: { x: 90, y: 400, w: 400, h: 100 }, elW: 500 } } };
+    const r = symmetricColumn('<div data-slot="body"></div>', diag, spec([]), { body: "body" }, 90);
+    expect(r.html).toContain("width:900px");
+  });
+});
