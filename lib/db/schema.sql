@@ -1,0 +1,24 @@
+CREATE TABLE IF NOT EXISTS brands(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, slug TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS lookbooks(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 0, source_path TEXT NOT NULL,
+  spec_json TEXT, spec_user_edited INTEGER NOT NULL DEFAULT 0, kit_path TEXT, fidelity_score REAL,
+  ingest_cost_json TEXT, status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(brand_id, version));
+CREATE TABLE IF NOT EXISTS carousels(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  lookbook_id INTEGER NOT NULL REFERENCES lookbooks(id) ON DELETE CASCADE, topic TEXT NOT NULL, n_slides INTEGER NOT NULL,
+  language TEXT NOT NULL, plan_json TEXT, copy_json TEXT, cost_json TEXT, status TEXT NOT NULL DEFAULT 'new',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS slides(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, carousel_id INTEGER NOT NULL REFERENCES carousels(id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL, archetype TEXT NOT NULL, platform_overrides_json TEXT, png_ig TEXT, png_li TEXT,
+  version INTEGER NOT NULL DEFAULT 1, render_json TEXT, UNIQUE(carousel_id, idx));
+CREATE TABLE IF NOT EXISTS llm_calls(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, carousel_id INTEGER REFERENCES carousels(id) ON DELETE CASCADE,
+  lookbook_id INTEGER REFERENCES lookbooks(id) ON DELETE CASCADE, stage TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+  in_tokens INTEGER NOT NULL DEFAULT 0, out_tokens INTEGER NOT NULL DEFAULT 0, cached_tokens INTEGER NOT NULL DEFAULT 0,
+  images INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0, latency_ms INTEGER NOT NULL DEFAULT 0,
+  fallback_used INTEGER NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value_encrypted TEXT NOT NULL);
