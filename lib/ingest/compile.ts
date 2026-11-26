@@ -95,7 +95,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   const N = Number(process.env.KIT_CANDIDATES ?? 3), FIRST = process.env.KIT_CANDIDATES ? N : 1, BAR = Number(process.env.KIT_BAR ?? 75);
   progress("kit", FIRST > 1 ? `Generating ${FIRST} candidate kits` : "Generating the templates");
   // dev switch: re-run alignment/decoration/measurement on the stored kit without paying for generation again
-  const stored = (opts.reuse || process.env.KIT_REUSE) ? await fs.readFile(path.join(kitDir, "kit.source.json"), "utf8").then((t) => JSON.parse(t) as KitOutput).catch(() => null) : null;
+  const stored = (opts.reuse || process.env.KIT_REUSE) ? await fs.readFile(path.join(kitDir, "kit.raw.json"), "utf8").catch(() => fs.readFile(path.join(kitDir, "kit.source.json"), "utf8")).then((t) => JSON.parse(t) as KitOutput).catch(() => null) : null; // the model's own output, before any automatic fix
   const gen = (k: number) => Promise.allSettled(Array.from({ length: k }, () => generateKit({ spec, pdf: lb.source_path, visionDir: path.join(dir, "vision"), lookbookId, geometry: geometryText })));
   const pick = (settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[]) => settled.flatMap((r) => (r.status === "fulfilled" ? [{ kit: clean(r.value.kit, spec).kit, promptVersion: r.value.promptVersion }] : []));
   if (!stored) await assertCredits(Number(process.env.KIT_PREFLIGHT_USD ?? 1.0), "building the templates");
@@ -154,6 +154,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     const scores = spec.archetypes.map((a) => (metrics[a.id] ? metrics[a.id]!.score - penalty(a.id) : null)).filter((v): v is number => v !== null);
     return { kit: k, rendered: r, metrics, mean: mean(scores), min: scores.length ? Math.min(...scores) : 100, scored: scored.length };
   };
+  await fs.writeFile(path.join(kitDir, "kit.raw.json"), JSON.stringify(kit)).catch(() => {}); // what the model built (after the one constraint repair): re-polishing always starts from this, never from an already polished kit
   let best = await evaluate(kit, rendered);
   const rounds: KitReport["rounds"] = [{ round: 0, mean: best.mean, min: best.min, kept: true }];
   // free deterministic solver first: staged cycles (shape, then position), per-archetype acceptance
