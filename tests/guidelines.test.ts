@@ -112,3 +112,14 @@ describe("source pages come from the document anatomy, not the model", () => {
     expect(pg["quiz-post"]).toBe(a.posts[1].page);
   });
 });
+
+import { expandOptionSlots } from "@/lib/ingest/guidelines";
+describe("option slots come from the look book's lettered boxes", () => {
+  it("replaces a single options slot with one slot per lettered box", () => {
+    const spec: any = { archetypes: [{ id: "quiz", source_page: 4, slots: [{ name: "question", kind: "headline", max_words: 12, max_chars: 70, optional: false }, { name: "options", kind: "list", max_words: 20, max_chars: 120, optional: false }, { name: "footer", kind: "body", max_words: 6, max_chars: 40, optional: false }] }] };
+    const a: any = { posts: [{ page: 4, sample: ["Q?", "A", "B", "x", "C", "D", "y"] }] };
+    expandOptionSlots(spec, a);
+    expect(spec.archetypes[0].slots.map((s: any) => s.name)).toEqual(["question", "option-a", "option-b", "option-c", "option-d", "footer"]);
+    expect(expandOptionSlots(spec, a)).toEqual([]); // idempotent
+  });
+});

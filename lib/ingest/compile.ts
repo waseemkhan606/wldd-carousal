@@ -13,7 +13,7 @@ import { findLogoBox, cropLogo, type LogoBox } from "./logo";
 import { alignArchetype, sanitizeHex, swapLogo, enforceFurniture, fixContrast, enforceReadable } from "./autoalign";
 const W0 = 1080;
 import { assertCredits } from "../llm/preflight";
-import { polishStamps, enforceClearance, clearStaticText, addEdgeBands, harmoniseFurniture, enforceBackdropContrast, liftSlots, dedupeFurniture, nowrapPlaceholders, thickenRuledLines, rulerGrid, usesGrid, ruledLineHeights, snapToRuledGrid, leftAlignStray, anchorLeft, balanceVertical } from "./polish";
+import { polishStamps, enforceClearance, clearStaticText, floorTextSizes, addEdgeBands, harmoniseFurniture, enforceBackdropContrast, liftSlots, dedupeFurniture, nowrapPlaceholders, thickenRuledLines, rulerGrid, usesGrid, ruledLineHeights, snapToRuledGrid, leftAlignStray, anchorLeft, balanceVertical } from "./polish";
 import { verticalLines, diffLines, verticalLineOverride, lineOpacity } from "./decor";
 import { renderSlide, type RenderDiag } from "../render/renderer";
 import { lookbookCost } from "../llm/usage";
@@ -247,6 +247,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     const hf = harmoniseFurniture(A.archetypes, A.css); na += hf.length; for (const c of hf) alignLog.push(`coherence ${c}`);
     const th = thickenRuledLines(A.css); A.css = th.css; na += th.changed; if (th.changed) alignLog.push(`polish: ${th.changed} ruled-line gradient(s) thickened to 2px`);
     for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r) continue; if (geoFor(spec.archetypes.find((x) => x.id === a.id)!)) continue; /* sampled templates keep their measured alignment */ const o = leftAlignStray(a.html, r.diag, kindsOf(a.id)); a.html = o.html; if (o.slots.length) { stray[a.id] = o.slots; na += o.slots.length; alignLog.push(`polish ${a.id}: left-aligned ${o.slots.join(", ")}`); } }
+    for (const a of A.archetypes) { const f = floorTextSizes(a.html, kindsOf(a.id)); a.html = f.html; na += f.changes.length; if (f.changes.length) alignLog.push(`polish ${a.id}: ${f.changes.join(', ')}`); }
     const grid = rulerGrid(A.css);
     for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r || !usesGrid(a.html, grid)) continue; const o = ruledLineHeights(a.html, r.diag, kindsOf(a.id), grid); a.html = o.html; if (o.changes.length) { na += o.changes.length; alignLog.push(`coherence ${a.id} (ruled paper ${grid.pitch}px): ${o.changes.join(", ")}`); } }
     if (na) { const e = await evalKit(A); best = e.ev; manifest = e.m; }

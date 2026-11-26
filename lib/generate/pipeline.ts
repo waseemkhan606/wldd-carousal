@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { getBrand, listLookbooks } from "../db/repo";
-import { createCarousel, getCarousel, saveCopy, setStatus, upsertSlide, listSlides, carouselDir, setRenderInfo, type CopyData, type Flags, type Lang, type SlideCopy, type RenderInfo } from "../db/carousels";
+import { createCarousel, getCarousel, saveCopy, setStatus, upsertSlide, listSlides, carouselDir, setRenderInfo, getRenderInfo, type CopyData, type Flags, type Lang, type SlideCopy, type RenderInfo } from "../db/carousels";
 import { loadCtx, loadCtxForCarousel, type Ctx } from "./ctx";
 import { generateCopy, buildSystem, requirementsText, slideSchemaText, RepairSchema, SlideSchema } from "./plan";
 import { applyPlan, fixCounters, singleOf } from "./plan";
@@ -32,14 +32,14 @@ function knownProblems(ctx: Ctx, archetype: string): string[] {
 const handleFor = (ctx: Ctx, p: PlatformId) => (p === "linkedin" ? ctx.spec.brand.linkedin_handle ?? ctx.spec.brand.handle : ctx.spec.brand.handle) ?? "";
 
 /** Render one slide for both platforms (once if nothing differs), write the PNGs, return issues found by the render checks. */
-async function renderPair(ctx: Ctx, dir: string, s: SlideCopy, total: number): Promise<{ issues: Issue[]; ig: string; li: string; info: Partial<Record<PlatformId, RenderInfo>> }> {
+async function renderPair(ctx: Ctx, dir: string, s: SlideCopy, total: number, caps?: Record<string, number>): Promise<{ issues: Issue[]; ig: string; li: string; info: Partial<Record<PlatformId, RenderInfo>> }> {
   const png: Partial<Record<PlatformId, Buffer>> = {}, info: Partial<Record<PlatformId, RenderInfo>> = {};
   const kinds = Object.fromEntries((ctx.manifest.archetypes.find((a) => a.id === s.archetype)?.slots ?? []).map((x) => [x.name, x.kind]));
   const issues: Issue[] = [];
   const inputs = (p: PlatformId) => JSON.stringify([slotsFor(s, p), handleFor(ctx, p)]);
   for (const p of PLATFORM_IDS) {
     if (p === "linkedin" && inputs("linkedin") === inputs("instagram")) { png.linkedin = png.instagram; info.linkedin = info.instagram; continue; }
-    const r = await renderSlide({ kitDir: ctx.kitDir, manifest: ctx.manifest, archetypeId: s.archetype, slots: slotsFor(s, p), polish: true, vars: { idx: s.idx, total, handle: handleFor(ctx, p), brand: ctx.spec.brand.name } });
+    const r = await renderSlide({ kitDir: ctx.kitDir, manifest: ctx.manifest, archetypeId: s.archetype, slots: slotsFor(s, p), polish: true, caps, vars: { idx: s.idx, total, handle: handleFor(ctx, p), brand: ctx.spec.brand.name } });
     png[p] = r.png;
     info[p] = { slots: Object.fromEntries(Object.entries(r.diag.slots).map(([n, x]) => [n, { kind: kinds[n] ?? "", ff: x.ff ?? "", color: x.color ?? "", size: x.size, bg: x.bg ?? "", bd: x.bd ?? "" }])), furniture: r.diag.furniture, furnitureMisplaced: r.diag.furnitureMisplaced, collisions: r.diag.collisions, rootBg: r.diag.rootBg ?? "" };
     for (const prob of r.problems) {
@@ -143,6 +143,14 @@ export async function generateCarousel(opts: { brandId: number; topic: string; n
       }
     }
     fixCounters(copy.slides, ctx.manifest); // repairs and the cover director may have rewritten a counter
+    // consistent type size across the inside slides
+    {
+      const sizes = new Map<number, Record<string, { kind: string; size: number }>>();
+      for (const sl of copy.slides) { const i = files.get(sl.idx)?.info.instagram; if (i) sizes.set(sl.idx, Object.fromEntries(Object.entries(i.slots).map(([k, v]) => [k, { kind: v.kind, size: v.size }]))); }
+      const caps = sizeCapsFor(ctx, copy.slides, sizes);
+      for (const sl of copy.slides) { const c = caps.get(sl.idx); if (!c) continue; const r = await renderPair(ctx, dir, sl, copy.slides.length, c); files.set(sl.idx, { ig: r.ig, li: r.li, info: r.info }); }
+      if (caps.size) progress("render", `Matching type sizes across ${caps.size} slide(s)`);
+    }
     // hard limits never ship broken: whatever the model left over the cap is cut back in code, then re-checked
     {
       const cut = capSlideWords(copy, ctx.spec, ctx.manifest);
@@ -194,6 +202,24 @@ export async function generateCarousel(opts: { brandId: number; topic: string; n
   }
 }
 
+/**
+ * One type size per role across a carousel. Each slide's text is fitted on its own, so the same headline or body drifts from slide to
+ * slide with copy length. Inside slides (not the cover or the closer) are brought to the typical size: bigger ones are capped, and slides
+ * that genuinely need smaller text (long copy) keep it. Pure render work: no model call.
+ */
+export function sizeCapsFor(ctx: Ctx, slides: SlideCopy[], sizes: Map<number, Record<string, { kind: string; size: number }>>): Map<number, Record<string, number>> {
+  const n = slides.length, inside = slides.filter((s) => s.idx !== 1 && s.idx !== n);
+  const out = new Map<number, Record<string, number>>();
+  if (inside.length < 2) return out;
+  for (const kind of ["headline", "number", "body"]) {
+    const entries = inside.flatMap((s) => Object.entries(sizes.get(s.idx) ?? {}).filter(([, v]) => v.kind === kind && v.size > 0).map(([name, v]) => ({ idx: s.idx, name, size: v.size })));
+    if (entries.length < 2) continue;
+    const sorted = entries.map((e) => e.size).sort((a, b) => a - b), target = sorted[Math.floor((sorted.length - 1) / 2)]; // lower median
+    for (const e of entries) if (e.size > target + 1) out.set(e.idx, { ...(out.get(e.idx) ?? {}), [e.name]: target });
+  }
+  return out;
+}
+
 export async function exportAll(carouselId: number) {
   const { carousel, ctx } = loadCtxForCarousel(carouselId);
   const dir = carouselDir(ctx.brand.slug, carouselId);
@@ -214,9 +240,15 @@ export async function editSlideText(carouselId: number, idx: number, edit: { pla
   return rerenderSlide(carouselId, ctx, carousel.language, copy, s);
 }
 
+/** Font-size ceilings for one slide so an edited or regenerated slide keeps the carousel's type sizes. */
+function capsFromStored(ctx: Ctx, carouselId: number, copy: CopyData, idx: number): Record<string, number> | undefined {
+  const stored = getRenderInfo(carouselId), sizes = new Map<number, Record<string, { kind: string; size: number }>>();
+  for (const sl of copy.slides) { const i = stored[sl.idx]?.instagram; if (i) sizes.set(sl.idx, Object.fromEntries(Object.entries(i.slots).map(([k, v]) => [k, { kind: v.kind, size: v.size }]))); }
+  return sizeCapsFor(ctx, copy.slides, sizes).get(idx);
+}
 async function rerenderSlide(carouselId: number, ctx: Ctx, lang: Lang, copy: CopyData, s: SlideCopy) {
   const dir = carouselDir(ctx.brand.slug, carouselId);
-  const issues = [...validateSlide(s, ctx.spec, ctx.manifest, lang, copy.slides.length, copy.slides), ...(await renderPair(ctx, dir, s, copy.slides.length).then(async (r) => { upsertSlide(carouselId, s.idx, s.archetype, r.ig, r.li, s.overrides); setRenderInfo(carouselId, s.idx, r.info); return r.issues; }))];
+  const issues = [...validateSlide(s, ctx.spec, ctx.manifest, lang, copy.slides.length, copy.slides), ...(await renderPair(ctx, dir, s, copy.slides.length, capsFromStored(ctx, carouselId, copy, s.idx)).then(async (r) => { upsertSlide(carouselId, s.idx, s.archetype, r.ig, r.li, s.overrides); setRenderInfo(carouselId, s.idx, r.info); return r.issues; }))];
   const flags = { ...(getCarousel(carouselId)!.flags) };
   if (issues.length) flags[String(s.idx)] = flagsFrom(issues)[String(s.idx)]; else delete flags[String(s.idx)];
   saveCopy(carouselId, copy, flags);
@@ -255,8 +287,11 @@ export { z };
 export async function rerenderCarousel(carouselId: number): Promise<{ flags: Flags }> {
   const { carousel, ctx } = loadCtxForCarousel(carouselId);
   const copy = carousel.copy!, dir = carouselDir(ctx.brand.slug, carouselId), flags: Flags = {};
+  const first = new Map<number, Awaited<ReturnType<typeof renderPair>>>(), sizes = new Map<number, Record<string, { kind: string; size: number }>>();
+  for (const s of copy.slides) { const r = await renderPair(ctx, dir, s, copy.slides.length); first.set(s.idx, r); const i = r.info.instagram; if (i) sizes.set(s.idx, Object.fromEntries(Object.entries(i.slots).map(([k, v]) => [k, { kind: v.kind, size: v.size }]))); }
+  const caps = sizeCapsFor(ctx, copy.slides, sizes);
   for (const s of copy.slides) {
-    const r = await renderPair(ctx, dir, s, copy.slides.length);
+    const r = caps.get(s.idx) ? await renderPair(ctx, dir, s, copy.slides.length, caps.get(s.idx)) : first.get(s.idx)!;
     upsertSlide(carouselId, s.idx, s.archetype, r.ig, r.li, s.overrides); setRenderInfo(carouselId, s.idx, r.info);
     const issues = [...validateSlide(s, ctx.spec, ctx.manifest, carousel.language, copy.slides.length, copy.slides), ...r.issues];
     if (issues.length) flags[String(s.idx)] = flagsFrom(issues)[String(s.idx)];

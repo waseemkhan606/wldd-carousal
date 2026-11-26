@@ -88,12 +88,14 @@ export const PAGE_SCRIPT = String.raw`
     const live = () => els.filter((e) => getComputedStyle(e).display !== "none" && e.textContent);
     for (let pass = 0; pass < 14; pass++) {
       const L = live(); let hit = null;
-      for (let i = 0; i < L.length && !hit; i++) for (let j = i + 1; j < L.length; j++) if (!L[i].contains(L[j]) && !L[j].contains(L[i]) && overlap(textRect(L[i]), textRect(L[j]))) { hit = [L[i], L[j]]; break; }
+      // two content slots that stack must keep breathing room (a quarter of the upper line's size, at least 14px), not just avoid overlapping
+      const room = (a, b) => { const ra = textRect(a), rb = textRect(b), up = ra.top <= rb.top ? [a, ra] : [b, rb], lo = ra.top <= rb.top ? rb : ra, g = Math.max(14, 0.25 * parseFloat(getComputedStyle(up[0]).fontSize)); return Math.min(ra.right, rb.right) > Math.max(ra.left, rb.left) + 4 && lo.top < up[1].bottom + g && lo.bottom > up[1].top; };
+      for (let i = 0; i < L.length && !hit; i++) for (let j = i + 1; j < L.length; j++) if (!L[i].contains(L[j]) && !L[j].contains(L[i]) && (overlap(textRect(L[i]), textRect(L[j])) || room(L[i], L[j]))) { hit = [L[i], L[j]]; break; }
       if (!hit) return;
       const [a, b] = textRect(hit[0]).top <= textRect(hit[1]).top ? hit : [hit[1], hit[0]];
       const min = parseFloat(a.dataset.minSize || "") || 12, cur = parseFloat(getComputedStyle(a).fontSize);
       if (cur > min + 0.5) { a.style.fontSize = Math.max(min, Math.floor(cur * 0.93)) + "px"; continue; }
-      const gap = textRect(a).bottom - textRect(b).top + 6, tr = (getComputedStyle(b).translate || "0px 0px").split(/\s+/).map(parseFloat);
+      const gap = textRect(a).bottom - textRect(b).top + Math.max(14, 0.25 * parseFloat(getComputedStyle(a).fontSize)), tr = (getComputedStyle(b).translate || "0px 0px").split(/\s+/).map(parseFloat);
       if (textRect(b).bottom + gap < rootRect.bottom - SAFE.bottom) { b.style.translate = (tr[0] || 0) + "px " + ((tr[1] || 0) + gap) + "px"; continue; }
       return;
     }
@@ -126,6 +128,7 @@ export const PAGE_SCRIPT = String.raw`
       for (const el of els) {
         const name = el.getAttribute("data-slot");
         if (!(name in p.slots)) continue;
+        if (p.caps && p.caps[name]) { const cur = parseFloat(el.dataset.maxSize || "") || parseFloat(getComputedStyle(el).fontSize); el.dataset.maxSize = String(Math.min(cur, p.caps[name])); el.dataset.minSize = String(Math.min(parseFloat(el.dataset.minSize || "") || 12, p.caps[name])); }
         const f = plain(p.slots[name]) === "" ? { size: parseFloat(getComputedStyle(el).fontSize), overflow: false } : fit(el, rootRect);
         const tr = textRect(el); diag.slots[name] = { ...f, textOk: el.textContent === plain(p.slots[name]), rect: { x: tr.left - rootRect.left, y: tr.top - rootRect.top, w: tr.width, h: tr.height }, elW: el.getBoundingClientRect().width, ls: parseFloat(getComputedStyle(el).letterSpacing) || 0, ff: getComputedStyle(el).fontFamily, color: getComputedStyle(el).color, bg: (() => { let n = el; for (let i = 0; i < 4 && n && n !== root.firstElementChild; i++, n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (c && !/rgba\(.*,\s*0\)|transparent/.test(c)) return c; } return ""; })(), bd: (() => { let n = el; for (let i = 0; i < 4 && n && n !== root.firstElementChild; i++, n = n.parentElement) { const st = getComputedStyle(n); if (parseFloat(st.borderTopWidth) > 0 && st.borderTopStyle !== "none") return st.borderTopColor; } return ""; })(), lh: parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.2 };
       }

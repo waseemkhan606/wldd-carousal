@@ -38,7 +38,7 @@ export async function stream<T = any>(url: string, body: unknown, onProgress: (p
       else if (ev === "result") result = j;
     }
   }
-  if (result === undefined) throw new Error("The server closed the connection before finishing.");
+  if (result === undefined) { const e = new Error("The connection dropped before the result arrived. The job keeps running on the server."); e.name = "StreamDropped"; throw e; }
   return result;
 }
 

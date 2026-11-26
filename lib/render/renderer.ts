@@ -50,6 +50,7 @@ export type RenderResult = { png: Buffer; diag: RenderDiag; problems: string[] }
 export type RenderInput = {
   kitDir: string; manifest: KitManifest; archetypeId: string; slots: Record<string, string>;
   vars: { idx: number | string; total: number | string; handle?: string; brand?: string };
+  caps?: Record<string, number>; // per-slot font-size ceilings (consistent type size across a carousel)
   polish?: boolean; // generation-time typography (balanced headlines, no orphans); off at ingest so kits are measured against the reference as-is
 };
 
@@ -68,7 +69,7 @@ export function renderSlide(inp: RenderInput): Promise<RenderResult> {
     const html = await fs.readFile(path.join(inp.kitDir, a.file), "utf8");
     const page = await kitPage(inp.kitDir);
     const diag: RenderDiag = await page.evaluate(
-      `window.__cs.render(${JSON.stringify({ html, slots: inp.slots, vars: inp.vars, families: inp.manifest.families, slotNames: a.slots.map((s) => s.name), furniturePositions: inp.manifest.furniture, margins: inp.manifest.margins, polish: !!inp.polish, kinds: Object.fromEntries(a.slots.map((s) => [s.name, s.kind])) })})`,
+      `window.__cs.render(${JSON.stringify({ html, slots: inp.slots, vars: inp.vars, families: inp.manifest.families, slotNames: a.slots.map((s) => s.name), furniturePositions: inp.manifest.furniture, margins: inp.manifest.margins, polish: !!inp.polish, caps: inp.caps ?? {}, kinds: Object.fromEntries(a.slots.map((s) => [s.name, s.kind])) })})`,
     );
     const problems = diagnosticsToProblems(diag, a.slots.filter((s) => !s.optional).map((s) => s.name));
     renderStats.renders++; renderStats.integrityChecks += Object.keys(diag.slots).length; renderStats.integrityFailures += problems.filter((p) => p.startsWith("TEXT_INTEGRITY")).length;

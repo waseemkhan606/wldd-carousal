@@ -52,9 +52,17 @@ import { addEdgeBands } from "@/lib/ingest/polish";
 describe("look book edge element", () => {
   const spec: any = { colors: [{ token: "paper", hex: "#F4F1E8" }, { token: "green", hex: "#0E3B2E" }], guidelines: [], elements: [{ id: "ruled-paper", description: "lines mimicking ledger paper", enabled: true, placement: "" }, { id: "receipt-edge", description: "Serrated edge", placement: "Top and/or bottom of the canvas.", enabled: true }] };
   it("adds a serrated band top and bottom on dark slides only, using the right element", () => {
-    const arch = [{ id: "dark", html: '<div data-arch="dark" class="slide bg-green"></div>' }, { id: "light", html: '<div data-arch="light" class="slide bg-paper"></div>' }];
+    const arch = [{ id: "dark", html: '<div data-arch="dark" class="slide bg-green"><div class="el-receipt-edge"></div></div>' }, { id: "light", html: '<div data-arch="light" class="slide bg-paper"></div>' }];
     const r = addEdgeBands(arch, "", spec);
-    expect(arch[0].html).toContain("el-receipt-edge el-edge-band el-edge-top"); expect(arch[0].html).toContain("el-edge-bottom"); expect(arch[1].html).not.toContain("el-edge");
+    expect(arch[0].html).toContain("el-edge-band el-edge-top"); expect(arch[0].html).toContain("el-edge-bottom"); expect(arch[1].html).not.toContain("el-edge");
     expect(r.css).toContain("clip-path:polygon"); expect(addEdgeBands(arch, r.css, spec).changes).toEqual([]); // idempotent
+  });
+});
+
+import { floorTextSizes } from "@/lib/ingest/polish";
+describe("type size floor and spec options", () => {
+  it("raises the smallest size of running text, never touches answer options", () => {
+    const r = floorTextSizes('<div data-slot="body" data-max-size="40" data-min-size="21"></div><div data-slot="option-a" data-max-size="40" data-min-size="20"></div>', { body: "body", "option-a": "body" });
+    expect(r.html).toMatch(/data-slot="body"[^>]*data-min-size="26"/); expect(r.html).toMatch(/data-slot="option-a"[^>]*data-min-size="20"/);
   });
 });

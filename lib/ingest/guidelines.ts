@@ -153,6 +153,26 @@ export function assignSourcePages(s: StyleSpec, a: Anatomy): void {
  * Merge everything parsed from the look book into the Style Spec without losing anything the model produced:
  * colour names/roles, font roles, voice statements, furniture, formats, guidelines and the machine rules they imply.
  */
+/**
+ * A post whose sample shows lettered answer boxes (A, B, C, D) needs one slot per option. The vision model sometimes returns a
+ * single "options" slot, which the template then repeats in every box. The look book's own page tells us how many options there are.
+ */
+export function expandOptionSlots(s: StyleSpec, a: Anatomy): string[] {
+  const changes: string[] = [];
+  for (const post of a.posts) {
+    const letters = post.sample.filter((t) => /^[A-F]$/.test(t.trim())).map((t) => t.trim()); if (letters.length < 3) continue;
+    const arch = s.archetypes.find((x) => x.source_page === post.page); if (!arch) continue;
+    const have = arch.slots.filter((x) => /option|choice|answer/i.test(x.name));
+    if (have.length >= letters.length) continue;
+    const proto = have[0] ?? { kind: "body", max_words: 6, max_chars: 40, optional: false } as any;
+    const at = have.length ? arch.slots.indexOf(have[0]) : arch.slots.length;
+    const made = letters.map((l) => ({ ...proto, name: `option-${l.toLowerCase()}`, kind: proto.kind === "list" ? "body" : proto.kind, max_words: Math.max(5, Math.min(proto.max_words ?? 6, 7)), max_chars: Math.max(32, Math.min(proto.max_chars ?? 40, 48)), optional: false }));
+    arch.slots = [...arch.slots.slice(0, at), ...made, ...arch.slots.filter((x, i) => i >= at && !have.includes(x))];
+    changes.push(`${arch.id}: ${have.map((x) => x.name).join(",") || "no option slot"} → ${made.map((x) => x.name).join(", ")}`);
+  }
+  return changes;
+}
+
 export function reconcileSpec(spec: StyleSpec, a: Anatomy, opts: { furniture?: boolean } = {}): StyleSpec {
   const s: StyleSpec = JSON.parse(JSON.stringify(spec));
   // colours: keep existing tokens (kits reference them) and attach the look book's names + roles
@@ -184,6 +204,7 @@ export function reconcileSpec(spec: StyleSpec, a: Anatomy, opts: { furniture?: b
     if (hit) { if (e.rotation !== undefined && hit.rotation_deg === undefined) hit.rotation_deg = e.rotation; }
   }
   assignSourcePages(s, a);
+  expandOptionSlots(s, a);
   s.formats = buildFormats(a);
   s.guidelines = gl;
   s.lookbook = { concept: a.concept, cadence: a.cadence, name: a.profile?.name, handle: a.profile?.handle, tagline: a.profile?.tagline ?? [], highlights: a.profile?.highlights ?? [], feedRules: a.profile?.feedRules ?? [], slides: a.carousel?.slides, motto: a.carousel?.motto, coverPage: a.carousel?.coverPage, insidePage: a.carousel?.insidePage, logo: a.logo ? { description: a.logo.description, usage: a.logo.usage } : undefined, coverage: a.coverage, warnings: a.warnings };

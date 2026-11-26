@@ -126,7 +126,7 @@ export function leftAlignStray(html: string, diag: RenderDiag, kinds: Record<str
     if (!s.rect || !["headline", "number", "body", "title", "stamp_text"].includes(kinds[name] ?? "")) continue;
     const mid = s.rect.x + s.rect.w / 2;
     if (kinds[name] === "stamp_text") { if (Math.abs(mid - W / 2) < 60 && s.rect.x > 240) slots.push(name); continue; }
-    if (Math.abs(mid - W / 2) < 45 && s.rect.x > 120 && s.rect.w < W * 0.85) { html = editSlot(html, name, { style: { "text-align": "left", "justify-content": "flex-start" } }); slots.push(name); }
+    if (Math.abs(mid - W / 2) < 50 && s.rect.x > 60 && s.rect.w < W * 0.92) { html = editSlot(html, name, { style: { "text-align": "left", "justify-content": "flex-start" } }); slots.push(name); }
   }
   return { html, slots };
 }
@@ -301,10 +301,12 @@ export function addEdgeBands(archetypes: { id: string; html: string }[], css: st
   const light = [...spec.colors].sort((a, b) => lum(b.hex) - lum(a.hex))[0]; if (!light) return { css, changes: [] };
   const cls = `el-${el.id}`, changes: string[] = [];
   for (const a of archetypes) {
-    if (new RegExp(`class="[^"]*\\b${cls}\\b`).test(a.html)) continue;
+    if (a.html.includes("el-edge-band")) continue; // already ours
     const bgTok = /class="slide[^"]*\bbg-([a-z0-9-]+)/.exec(a.html)?.[1], bg = spec.colors.find((c) => c.token === bgTok)?.hex; if (!bg) continue;
     if (contrastRatio(light.hex, bg) < 3) continue; // paper-on-paper: nothing to see
-    const bands = `${top ? `<div class="${cls} el-edge-band el-edge-top"></div>` : ""}${bottom ? `<div class="${cls} el-edge-band el-edge-bottom"></div>` : ""}`;
+    // the model's own drawing of this element (often a faint dotted line) is replaced by ours
+    a.html = a.html.replace(new RegExp(`<div[^>]*class="[^"]*\\b${cls}\\b[^"]*"[^>]*></div>`, "g"), "");
+    const bands = `${top ? `<div class="el-edge-band el-edge-top" data-element="${el.id}"></div>` : ""}${bottom ? `<div class="el-edge-band el-edge-bottom" data-element="${el.id}"></div>` : ""}`;
     a.html = a.html.replace(/^(\s*<div[^>]*>)/, `$1${bands}`); changes.push(`${a.id}: ${el.id} added (${[top && "top", bottom && "bottom"].filter(Boolean).join(" + ")})`);
   }
   if (changes.length && !css.includes("/* edge bands */")) {
@@ -314,4 +316,19 @@ export function addEdgeBands(archetypes: { id: string; html: string }[], css: st
     css += `\n/* edge bands */\n.el-edge-band{position:absolute;left:0;width:${W}px;height:30px;z-index:6;background-color:var(--c-${light.token});clip-path:polygon(${pts.join(",")});pointer-events:none}\n.el-edge-top{top:0}.el-edge-bottom{bottom:0;transform:scaleY(-1)}\n`;
   }
   return { css, changes };
+}
+
+/**
+ * Running text never shrinks to a size nobody can read: the fit engine may reduce a body slot to at most 65% of its designed size
+ * (and never below 26px). Longer copy then fails the fit check and is rewritten shorter, which beats tiny type.
+ */
+export function floorTextSizes(html: string, kinds: Record<string, string>): { html: string; changes: string[] } {
+  const changes: string[] = [];
+  for (const [name, kind] of Object.entries(kinds)) {
+    if (!["body", "maths"].includes(kind) || /option|choice|answer|footer/i.test(name)) continue;
+    const m = new RegExp(`data-slot=["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*?data-max-size="(\\d+)"[^>]*?data-min-size="(\\d+)"`).exec(html); if (!m) continue;
+    const max = +m[1], min = +m[2], want = Math.min(max, Math.max(min, Math.round(max * 0.65), 26));
+    if (want > min) { html = editSlot(html, name, { data: { "data-min-size": want } }); changes.push(`${name}: smallest size ${min}→${want}px`); }
+  }
+  return { html, changes };
 }

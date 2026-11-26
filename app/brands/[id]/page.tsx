@@ -73,10 +73,22 @@ export default function BrandPage({ params }: { params: Promise<{ id: string }> 
     } catch (e: any) { toast(e.message, "err"); }
     setRunning(null);
   }
+  /** The server keeps working when the connection drops: wait for the look book's status to leave "ingesting". */
+  async function waitForLookbook(lbId: number) {
+    for (let i = 0; i < 400; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const d = await api<any>(`/api/lookbooks/${lbId}`).catch(() => null);
+      if (d && d.lookbook.status !== "ingesting") return d.lookbook.status as string;
+    }
+    return "ingesting";
+  }
   async function ingest(lbId: number, force = false) {
     setRunning("ingest"); setFailed(""); prog.reset();
     try { await stream(`/api/lookbooks/${lbId}/ingest${force ? "?force=1" : ""}`, {}, prog.push); await loadBrand(); await loadDetail(lbId); toast("Look book ready."); }
-    catch (e: any) { setFailed(e.message); await loadBrand(); }
+    catch (e: any) {
+      if (e.name === "StreamDropped") { const st = await waitForLookbook(lbId); await loadBrand(); await loadDetail(lbId); if (st === "ready") toast("Look book ready."); else setFailed(st === "ingesting" ? "Still working. Reload this page in a few minutes." : "The ingest did not finish. Check the status and try again."); }
+      else { setFailed(e.message); await loadBrand(); }
+    }
     setRunning(null);
   }
   async function upload(f: File) {
@@ -93,7 +105,7 @@ export default function BrandPage({ params }: { params: Promise<{ id: string }> 
   async function openRebuild() { setEstimate(null); setRebuildOpen(true); api<any>(`/api/lookbooks/${sel}/rebuild`).then(setEstimate).catch((e) => toast(e.message, "err")); }
   async function rebuild(reuse = false) {
     setRebuildOpen(false); setRunning("rebuild"); setFailed(""); prog.reset();
-    try { await stream(`/api/lookbooks/${sel}/rebuild`, { reuse }, prog.push); await loadBrand(); await loadDetail(sel!); toast(reuse ? "Templates re-polished (no cost)." : "Templates rebuilt."); } catch (e: any) { setFailed(e.message); }
+    try { await stream(`/api/lookbooks/${sel}/rebuild`, { reuse }, prog.push); await loadBrand(); await loadDetail(sel!); toast(reuse ? "Templates re-polished (no cost)." : "Templates rebuilt."); } catch (e: any) { if (e.name === "StreamDropped") { const st = await waitForLookbook(sel!); await loadBrand(); await loadDetail(sel!); if (st === "ready") toast("Templates rebuilt."); else setFailed("The rebuild did not finish. Try again."); } else setFailed(e.message); }
     setRunning(null);
   }
   async function removeLb() { if (!toDelete) return; try { await api(`/api/lookbooks/${toDelete.id}`, { method: "DELETE" }); setToDelete(null); await loadBrand(); toast("Version deleted.", "info"); } catch (e: any) { toast(e.message, "err"); setToDelete(null); } }
