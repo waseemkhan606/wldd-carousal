@@ -66,3 +66,18 @@ describe("type size floor and spec options", () => {
     expect(r.html).toMatch(/data-slot="body"[^>]*data-min-size="26"/); expect(r.html).toMatch(/data-slot="option-a"[^>]*data-min-size="20"/);
   });
 });
+
+import { nestedSlots, balanceVertical } from "@/lib/ingest/polish";
+describe("text inside boxes stays with its box", () => {
+  const html = '<div class="slide bg-green"><div data-slot="question"></div><div class="options-grid"><div class="option-box"><div data-slot="option-a"></div></div></div></div>';
+  it("detects slots nested in wrapper boxes", () => { expect([...nestedSlots(html)]).toEqual(["option-a"]); });
+  it("does not shift content when any slot lives inside a box", () => {
+    const diag: any = { slots: { question: { rect: { x: 90, y: 200, w: 800, h: 150 } }, "option-a": { rect: { x: 100, y: 600, w: 300, h: 40 } } }, furnStats: {} };
+    expect(balanceVertical(html, diag, { layout: { margins_px: { top: 90, bottom: 90 } } } as any, { question: "headline", "option-a": "body" }).changes).toEqual([]);
+  });
+  it("finds the edge background through the spec's archetype token when the class uses a short name", () => {
+    const spec: any = { colors: [{ token: "ledger-paper", hex: "#F4F1E8" }, { token: "ledger-green", hex: "#0E3B2E" }], guidelines: [], archetypes: [{ id: "q", background_token: "ledger-green" }], elements: [{ id: "receipt-edge", description: "Jagged receipt edge", placement: "top, bottom", enabled: true }] };
+    const arch = [{ id: "q", html: '<div data-arch="q" class="slide bg-green"></div>' }];
+    expect(addEdgeBands(arch, "", spec).changes.length).toBe(1);
+  });
+});

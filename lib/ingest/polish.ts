@@ -9,6 +9,19 @@ import { editSlot } from "./autoalign";
 
 const W = 1080, H = 1350;
 
+/** Slots that sit inside a wrapper box (quiz options in their boxes, cards): moving them alone would take the text out of its box. */
+export function nestedSlots(html: string): Set<string> {
+  const out = new Set<string>(); let depth = 0;
+  for (const m of html.matchAll(/<(\/?)div\b([^>]*)>/g)) {
+    if (m[1]) { depth--; continue; }
+    depth++;
+    const name = /data-slot=["']([^"']+)["']/.exec(m[2])?.[1];
+    if (name && depth > 2) out.add(name);
+    if (/\/>\s*$/.test(m[2])) depth--;
+  }
+  return out;
+}
+
 /** Edit the inline style of the first opening tag matching `openRe` (used for stamp wrappers, which carry no data-slot). */
 function editTag(html: string, openRe: RegExp, style: Record<string, string>): string {
   const m = openRe.exec(html); if (!m) return html;
@@ -51,11 +64,12 @@ export function enforceClearance(html: string, diag: RenderDiag, spec: StyleSpec
   const changes: string[] = [], m = spec.layout.margins_px, mg = typeof m === "number" ? { top: m, right: m, bottom: m, left: m } : m;
   const ruleX = rules.filter((l) => l.thick <= 10 && l.x > 40 && l.x < W / 2).map((l) => l.x + l.thick).sort((a, b) => b - a)[0] ?? 0;
   const left = Math.max(mg.left, ruleX ? ruleX + 28 : 0), right = W - mg.right;
+  const nest = new Set([...nestedSlots(html)].filter((n) => kinds[n] !== "stamp_text"));
   const all: Record<string, { r: NonNullable<RenderDiag["slots"][string]["rect"]>; furn: boolean }> = {};
   for (const [n, s] of Object.entries(diag.slots)) if (s.rect && s.rect.w >= 4 && s.rect.h >= 4) all[n] = { r: s.rect, furn: false };
   for (const [n, s] of Object.entries(diag.furnStats ?? {})) if (s.rect && s.rect.w >= 4 && s.rect.h >= 4 && !all[n] && !/logo|mark|seal|texture|edge|glow/i.test(n)) all[n] = { r: s.rect, furn: true }; // text furniture (tag, counter, handle) obeys the same clearance
   for (const [name, { r }] of Object.entries(all)) {
-    if (skip.includes(name) || (kinds[name] === undefined && !all[name].furn)) continue;
+    if (skip.includes(name) || nest.has(name) || (kinds[name] === undefined && !all[name].furn)) continue;
     let dx = 0; const dy = r.y < mg.top ? mg.top - r.y : r.y + r.h > H - mg.bottom ? H - mg.bottom - (r.y + r.h) : 0;
     if (r.x < left) dx = left - r.x;
     else if (r.x + r.w > right) dx = Math.min(0, right - (r.x + r.w));
@@ -147,6 +161,7 @@ export function balanceVertical(html: string, diag: RenderDiag, spec: StyleSpec,
   const m = spec.layout.margins_px, mg = typeof m === "number" ? { top: m, bottom: m } : m;
   const content = Object.entries(diag.slots).filter(([n, s]) => s.rect && CONTENT.has(kinds[n] ?? ""));
   if (!content.length) return { html, changes: [] };
+  { const nest = nestedSlots(html); if (content.some(([n]) => nest.has(n) && kinds[n] !== "stamp_text")) return { html, changes: [] }; } // text living inside boxes moves with its box or not at all
   // only free-flowing text layouts: boxes drawn around/behind slots (quiz options, cards) must not drift from their slots
   if (content.some(([n]) => kinds[n] === "list")) return { html, changes: [] };
   if ([...html.matchAll(/class="([^"]*\bel-[^"]*)"/g)].some((m) => !/ruled|grid|glow|texture|edge|tape|stamp|paper|noise|scallop|logo|swipe|cta|hairline|line|bg|background/i.test(m[1]))) return { html, changes: [] };
@@ -195,7 +210,7 @@ export function ruledLineHeights(html: string, diag: RenderDiag, kinds: Record<s
 export function snapToRuledGrid(html: string, diag: RenderDiag, kinds: Record<string, string>, g: Grid): { html: string; changes: string[] } {
   const changes: string[] = [];
   for (const [name, s] of Object.entries(diag.slots)) {
-    if (!["body", "maths"].includes(kinds[name] ?? "") || !s.rect || !s.size || s.size * 1.1 > g.pitch) continue;
+    if (!["body", "maths"].includes(kinds[name] ?? "") || !s.rect || !s.size || s.size * 1.1 > g.pitch || nestedSlots(html).has(name)) continue;
     const baseline = s.rect.y + s.rect.h * 0.78, n = Math.round((baseline + 1 - g.off) / g.pitch), target = n * g.pitch + g.off - 1;
     const dy = Math.round(target - baseline);
     if (Math.abs(dy) >= 2 && Math.abs(dy) <= g.pitch / 2 + 1) { html = editSlot(html, name, { addTranslate: [0, dy] }); changes.push(`${name}: baseline snapped to the rule (${dy}px)`); }
@@ -302,7 +317,9 @@ export function addEdgeBands(archetypes: { id: string; html: string }[], css: st
   const cls = `el-${el.id}`, changes: string[] = [];
   for (const a of archetypes) {
     if (a.html.includes("el-edge-band")) continue; // already ours
-    const bgTok = /class="slide[^"]*\bbg-([a-z0-9-]+)/.exec(a.html)?.[1], bg = spec.colors.find((c) => c.token === bgTok)?.hex; if (!bg) continue;
+    const cls0 = /class="slide[^"]*\bbg-([a-z0-9-]+)/.exec(a.html)?.[1];
+    const tok = spec.archetypes.find((x) => x.id === a.id)?.background_token ?? cls0 ?? "";
+    const bg = (spec.colors.find((c) => c.token === tok) ?? spec.colors.find((c) => cls0 && (c.token === cls0 || c.token.endsWith(`-${cls0}`) || cls0.endsWith(`-${c.token}`))))?.hex; if (!bg) continue;
     if (contrastRatio(light.hex, bg) < 3) continue; // paper-on-paper: nothing to see
     // the model's own drawing of this element (often a faint dotted line) is replaced by ours
     a.html = a.html.replace(new RegExp(`<div[^>]*class="[^"]*\\b${cls}\\b[^"]*"[^>]*></div>`, "g"), "");
