@@ -40,8 +40,17 @@ export async function editTemplates(lookbookId: number, opts: { archetype?: stri
   const spec = StyleSpec.parse(JSON.parse(lb.spec_json)), kitDir = kitDirOf(lookbookId), f = files(kitDir);
   await assertCredits(0.15, "this template change");
   const kit = await rawKit(kitDir);
-  const targets = opts.archetype && opts.archetype !== "all" ? kit.archetypes.filter((a) => a.id === opts.archetype) : kit.archetypes;
-  if (!targets.length) throw new Error("That template was not found.");
+  const targets0 = opts.archetype && opts.archetype !== "all" ? kit.archetypes.filter((a) => a.id === opts.archetype) : kit.archetypes;
+  if (!targets0.length) throw new Error("That template was not found.");
+  // Edit what the owner SEES: the current finished template (after all automatic fixes), not the model's first draft.
+  // Otherwise the change would silently drop every earlier fix to that template. Falls back to the draft if the finished one would not validate.
+  const manifest = await readJson<{ archetypes: { id: string; file: string }[] } | null>(path.join(kitDir, "manifest.json"), null);
+  const finished = async (id: string) => { const file = manifest?.archetypes.find((x) => x.id === id)?.file; return file ? fs.readFile(path.join(kitDir, file), "utf8").catch(() => null) : null; };
+  const targets: typeof targets0 = [];
+  for (const a of targets0) {
+    const h = await finished(a.id);
+    targets.push(h && !validateKitStatic({ css: kit.css, archetypes: [{ ...a, html: h }] }, { ...spec, archetypes: spec.archetypes.filter((x) => x.id === a.id) }).length ? { ...a, html: h } : a);
+  }
 
   progress("edit", "Reading the template and your instruction");
   const prompt = await loadPrompt("kit_edit.md");

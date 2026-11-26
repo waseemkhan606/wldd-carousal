@@ -6,13 +6,14 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import type { PdfInfo } from "./pdf";
+import { normaliseFontName } from "./fonts";
 
 const run = promisify(execFile);
 const MAX = 128 * 1024 * 1024;
 
 export type Box = { x: number; y: number; w: number; h: number };
 export type GWord = Box & { text: string };
-export type GLine = Box & { text: string; color: string; align: "left" | "center" | "right" | "single"; estFontPx: number; font?: string; tracked?: boolean };
+export type GLine = Box & { text: string; color: string; align: "left" | "center" | "right" | "single"; estFontPx: number; font?: string; weight?: number; tracked?: boolean };
 export type GShape = Box & { fill?: string; stroke?: string; rotationDeg?: number };
 export type PageGeometry = {
   page: number; scale: number; offsetY: number; offsetMethod: "svg-fill" | "full-page" | "unknown";
@@ -126,7 +127,7 @@ export async function extractGeometry(pdf: string, page: number, info: PdfInfo, 
     const shapes: GShape[] = shapesPt.map((s) => {
       const box = { x: (s.x - offsetX) * scale, y: (s.y - offsetPt) * scale, w: s.w * scale, h: s.h * scale };
       return { ...box, fill: s.fill, stroke: s.stroke, rotationDeg: rotation(s.pts) };
-    }).filter((s) => s.w > 3 && s.h > 3 && s.y > -4 && s.y + s.h < 1354 && !(s.w > 1060 && s.h > 1300) && (s.fill || s.stroke));
+    }).filter((s) => s.w > 3 && s.h > 3 && s.y > -4 && s.y + s.h < 1354 && !(s.w > 1060 && s.h > 1300) && s.x > -4 && s.x + s.w < 1084 && (s.fill || s.stroke)); // x bounds: a strip page holds several slides, and shapes of the neighbours must not leak in
     return { page, scale, offsetY: offsetPt, offsetMethod: method, words, lines, shapes: shapes.slice(0, 40), referencePng: refPng, frame };
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -211,7 +212,7 @@ async function attachFonts(pdf: string, page: number, offsetPt: number, offsetX:
       const r = runs.filter((u) => cx >= u.x - 6 && cx <= u.x + u.w + 6 && cy >= u.y - 6 && cy <= u.y + u.h + 6).sort((a, b) => b.text.replace(/\s/g, "").length - a.text.replace(/\s/g, "").length)[0]
         ?? runs.filter((u) => Math.abs(u.y - l.y) < l.h && u.x < l.x + l.w && u.x + u.w > l.x)[0];
       if (!r) continue;
-      l.font = normFam(r.f.family); l.estFontPx = Math.round(r.f.size * scale); l.color = r.f.color;
+      l.font = normFam(r.f.family); l.weight = normaliseFontName(r.f.family).weight ?? undefined; l.estFontPx = Math.round(r.f.size * scale); l.color = r.f.color;
       l.tracked = /^(\S ){3,}/.test(r.text.trim());
     }
   } catch { /* fonts are an enhancement; geometry stands without them */ }

@@ -250,12 +250,12 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     const eb = addEdgeBands(A.archetypes, A.css, spec); A.css = eb.css; na += eb.changes.length; for (const c of eb.changes) alignLog.push(`coherence ${c}`);
     const hf = harmoniseFurniture(A.archetypes, A.css); na += hf.length; for (const c of hf) alignLog.push(`coherence ${c}`);
     const th = thickenRuledLines(A.css); A.css = th.css; na += th.changed; if (th.changed) alignLog.push(`polish: ${th.changed} ruled-line gradient(s) thickened to 2px`);
-    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r) continue; if (exempt.align || geoFor(spec.archetypes.find((x) => x.id === a.id)!)) continue; /* sampled templates keep their measured alignment; a stated alignment rule is respected */ const o = leftAlignStray(a.html, r.diag, kindsOf(a.id)); a.html = o.html; if (o.slots.length) { stray[a.id] = o.slots; na += o.slots.length; alignLog.push(`polish ${a.id}: left-aligned ${o.slots.join(", ")}`); } }
-    { const proxies = A.archetypes.map((a) => ({ id: a.id, html: a.html, isCover: /cover/i.test(a.id) || (!!spec.lookbook?.coverPage && spec.archetypes.find((x) => x.id === a.id)?.source_page === spec.lookbook.coverPage) }));
-      const ch = hygieneType(proxies, kindsOf, exempt); proxies.forEach((p, i) => { A.archetypes[i].html = p.html; }); na += ch.length; if (ch.length) alignLog.push(`hygiene: ${ch.join("; ")}`); }
-    for (const a of A.archetypes) { const f = floorTextSizes(a.html, kindsOf(a.id)); a.html = f.html; na += f.changes.length; if (f.changes.length) alignLog.push(`polish ${a.id}: ${f.changes.join(', ')}`); }
+    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r) continue; if (exempt.align || ownerEdited.has(a.id) || geoFor(spec.archetypes.find((x) => x.id === a.id)!)) continue; /* sampled templates keep their measured alignment; a stated alignment rule is respected */ const o = leftAlignStray(a.html, r.diag, kindsOf(a.id)); a.html = o.html; if (o.slots.length) { stray[a.id] = o.slots; na += o.slots.length; alignLog.push(`polish ${a.id}: left-aligned ${o.slots.join(", ")}`); } }
+    { const proxies = A.archetypes.filter((a) => !ownerEdited.has(a.id)).map((a) => ({ id: a.id, html: a.html, isCover: /cover/i.test(a.id) || (!!spec.lookbook?.coverPage && spec.archetypes.find((x) => x.id === a.id)?.source_page === spec.lookbook.coverPage) }));
+      const ch = hygieneType(proxies, kindsOf, exempt); proxies.forEach((p) => { A.archetypes.find((x) => x.id === p.id)!.html = p.html; }); na += ch.length; if (ch.length) alignLog.push(`hygiene: ${ch.join("; ")}`); }
+    for (const a of A.archetypes) { if (ownerEdited.has(a.id)) continue; const f = floorTextSizes(a.html, kindsOf(a.id)); a.html = f.html; na += f.changes.length; if (f.changes.length) alignLog.push(`polish ${a.id}: ${f.changes.join(', ')}`); }
     const grid = rulerGrid(A.css);
-    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r || !usesGrid(a.html, grid)) continue; const o = ruledLineHeights(a.html, r.diag, kindsOf(a.id), grid); a.html = o.html; if (o.changes.length) { na += o.changes.length; alignLog.push(`coherence ${a.id} (ruled paper ${grid.pitch}px): ${o.changes.join(", ")}`); } }
+    for (const a of A.archetypes) { const r = best.rendered[a.id]; if (!r || ownerEdited.has(a.id) || !usesGrid(a.html, grid)) continue; const o = ruledLineHeights(a.html, r.diag, kindsOf(a.id), grid); a.html = o.html; if (o.changes.length) { na += o.changes.length; alignLog.push(`coherence ${a.id} (ruled paper ${grid.pitch}px): ${o.changes.join(", ")}`); } }
     if (na) { const e = await evalKit(A); best = e.ev; manifest = e.m; }
     // phase B: positioning on the fresh render
     const nk: KitOutput = JSON.parse(JSON.stringify(best.kit)); let n = 0;
@@ -263,13 +263,14 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       const r = best.rendered[a.id]; if (!r) continue;
       const kinds = kindsOf(a.id), rules = await verticalLines(r.png).catch(() => []);
       const ruleX = rules.filter((l) => l.thick <= 10 && l.x > 40 && l.x < W0 / 2).map((l) => l.x + l.thick).sort((x, y) => y - x)[0] ?? 0, left = Math.max(mgL, ruleX ? ruleX + 28 : 0);
-      const o0 = anchorLeft(a.html, r.diag, stray[a.id] ?? [], left, kinds); a.html = o0.html;
-      const o1 = enforceClearance(a.html, r.diag, spec, rules, kinds, stray[a.id] ?? []); a.html = o1.html;
-      const o3 = clearStaticText(a.html, nk.css, spec, rules); a.html = o3.html;
-      const oR = alignRows(a.html, r.diag, kinds); a.html = oR.html;
-      const oS = !exempt.align && !geoFor(spec.archetypes.find((x) => x.id === a.id)!) ? symmetricColumn(a.html, r.diag, spec, kinds, left) : { html: a.html, changes: [] as string[] }; a.html = oS.html;
-      const o5 = usesGrid(a.html, grid) ? snapToRuledGrid(a.html, r.diag, kinds, grid) : { html: a.html, changes: [] as string[] }; a.html = o5.html;
-      const o4 = balanceVertical(a.html, r.diag, spec, kinds, usesGrid(a.html, grid) ? grid.pitch : 0); a.html = o4.html;
+      const mine = ownerEdited.has(a.id), skip = () => ({ html: a.html, changes: [] as string[] }); // an instruction edit is final: layout polish never rewrites it
+      const o0 = mine ? skip() : anchorLeft(a.html, r.diag, stray[a.id] ?? [], left, kinds); a.html = o0.html;
+      const o1 = mine ? skip() : enforceClearance(a.html, r.diag, spec, rules, kinds, stray[a.id] ?? []); a.html = o1.html;
+      const o3 = mine ? skip() : clearStaticText(a.html, nk.css, spec, rules); a.html = o3.html;
+      const oR = mine ? skip() : alignRows(a.html, r.diag, kinds); a.html = oR.html;
+      const oS = !mine && !exempt.align && !geoFor(spec.archetypes.find((x) => x.id === a.id)!) ? symmetricColumn(a.html, r.diag, spec, kinds, left) : { html: a.html, changes: [] as string[] }; a.html = oS.html;
+      const o5 = !mine && usesGrid(a.html, grid) ? snapToRuledGrid(a.html, r.diag, kinds, grid) : { html: a.html, changes: [] as string[] }; a.html = o5.html;
+      const o4 = mine ? skip() : balanceVertical(a.html, r.diag, spec, kinds, usesGrid(a.html, grid) ? grid.pitch : 0); a.html = o4.html;
       const o2 = polishStamps(a.html, kinds); a.html = o2.html;
       const o6 = dedupeFurniture(a.html, r.diag, kinds); a.html = nowrapPlaceholders(liftSlots(o6.html, kinds));
       const o7 = await enforceBackdropContrast(a.html, r.png, r.diag, spec, kinds); a.html = o7.html;
