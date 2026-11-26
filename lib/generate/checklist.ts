@@ -18,7 +18,7 @@ import { PLATFORM_IDS, LANGUAGES, type PlatformId } from "./platforms";
 import { renderSlide } from "../render/renderer";
 import { llmCall } from "../llm/router";
 import { loadPrompt } from "../ingest/spec";
-import { carouselOnly } from "./plan";
+import { carouselOnly, positionalBackgrounds } from "./plan";
 import { contrastRatio } from "../ingest/autoalign";
 
 export type Status = "pass" | "fail" | "pending" | "info" | "na";
@@ -101,7 +101,7 @@ async function evalGuideline(g: Guideline, e: Env): Promise<R> {
       return fails.length ? { status: "fail", evidence: fails.join("; "), slides: targets, fix: "Edit the slide's text to meet this" } : { status: "pass", evidence: notes.slice(0, 2).join(" · ") || "Requirements met", slides: targets };
     }
     case "alternate_background": {
-      const [x, y] = P.colours as { hex: string }[], mid = e.slides.filter((s) => s.idx > 1 && s.idx < n), seq = mid.map((s) => e.bgHex(s));
+      const [x, y] = P.colours as { hex: string }[], anchored = new Set(positionalBackgrounds(e.spec).flatMap((p) => Array.from({ length: Math.max(0, p.to - p.from + 1) }, (_, i) => p.from + i))), mid = e.slides.filter((s) => s.idx > 1 && s.idx < n && !anchored.has(s.idx)), seq = mid.map((s) => e.bgHex(s)); // slides whose background the look book fixes by position are not part of the rotation
       if (mid.length < 2) return { status: "na", evidence: "Fewer than two inside slides" };
       const bad = mid.filter((s, i) => (dist(seq[i], x.hex) > 40 && dist(seq[i], y.hex) > 40) || (i > 0 && dist(seq[i], seq[i - 1]) < 30));
       const names = seq.map((h) => (dist(h, x.hex) < 40 ? "A" : dist(h, y.hex) < 40 ? "B" : "?")).join(" ");
@@ -232,7 +232,7 @@ export async function evaluateChecklist(carouselId: number): Promise<Checklist> 
   {
     const bad: { slide: number; name: string; ratio: number }[] = []; let seen = 0;
     for (const sl of e.slides) { const inf = e.info[sl.idx]?.instagram; if (!inf) continue; const bg = e.bgHex(sl);
-      for (const [name, x] of Object.entries(inf.slots)) { if (!(slotsFor(sl, "instagram")[name] ?? "").trim() || !x.color || !bg) continue; seen++; const solid = x.bg && !/transparent|, 0\)/.test(x.bg) ? hexOf(x.bg) : bg; const r = contrastRatio(hexOf(x.color), solid || bg); if (r < (x.kind === "stamp_text" ? 1.5 : 3)) bad.push({ slide: sl.idx, name, ratio: r }); } }
+      for (const [name, x] of Object.entries(inf.slots)) { if (!(slotsFor(sl, "instagram")[name] ?? "").trim() || !x.color || !bg) continue; if (x.kind === "stamp_text" && !x.bg) continue; /* a stamp drawn on a separate box: its backdrop is not known from the text element alone */ seen++; const solid = x.bg && !/transparent|, 0\)/.test(x.bg) ? hexOf(x.bg) : bg; const r = contrastRatio(hexOf(x.color), solid || bg); if (r < (x.kind === "stamp_text" ? 1.5 : 3)) bad.push({ slide: sl.idx, name, ratio: r }); } }
     items.push({ id: "q-readable", section: "Quality check", page: 0, quote: "", statement: "All text is readable on its background", category: "design", scope: "carousel", method: "code", by: "code", status: bad.length ? "fail" : seen ? "pass" : "na", evidence: bad.length ? bad.slice(0, 3).map((b) => `slide ${b.slide} ${b.name}: contrast ${b.ratio.toFixed(1)}:1`).join("; ") : `${seen} text elements, all at least 3:1`, slides: [...new Set(bad.map((b) => b.slide))], fix: bad.length ? "Edit the slide's colour override or regenerate it." : undefined });
   }
   const count = (s: Status) => items.filter((i) => i.status === s).length, pass = count("pass"), fail = count("fail"), pending = count("pending");
