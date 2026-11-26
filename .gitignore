@@ -1,12 +1,33 @@
-node_modules
-.next
-data/
-.env*
-!.env.example
-samples/*.tmp
+# dependencies and build output
+node_modules/
+.next/
+out/
 *.tsbuildinfo
 next-env.d.ts
 
+# runtime data: database, uploaded look books, generated templates and carousels, API keys, access token hash.
+# NEVER commit any of this.
+data/
+*.db
+*.db-shm
+*.db-wal
+.secret
+auth.json
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+
+# generated review images and scratch files
 samples/
+*.tmp
+/tmp/
+
+# OS / editor / tooling
 .DS_Store
-.vercel
+.vscode/
+.idea/
+.vercel/
+.railway/
+*.log

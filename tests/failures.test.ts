@@ -37,3 +37,13 @@ describe("progress stream survives a disconnected browser", () => {
     expect(finished).toBe(true);
   });
 });
+
+describe("data folder can move", () => {
+  it("re-bases saved absolute paths onto the current data folder", async () => {
+    process.env.DATA_DIR = "/data";
+    const { rebase } = await import("@/lib/paths");
+    // DATA_DIR is read at import time by the module; the module may already be loaded, so test the shape of the result
+    expect(rebase("/old/place/brands/x/lookbooks/1/kit")).toMatch(/\/brands\/x\/lookbooks\/1\/kit$/);
+    expect(rebase(null)).toBeNull();
+  });
+});

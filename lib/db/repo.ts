@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { db } from "./index";
-import { DATA_DIR } from "../paths";
+import { DATA_DIR, rebase } from "../paths";
 
 export type Brand = { id: number; name: string; slug: string; created_at: string };
 export type Lookbook = { id: number; brand_id: number; version: number; is_active: number; source_path: string; spec_json: string | null; spec_user_edited: number; kit_path: string | null; fidelity_score: number | null; ingest_cost_json: string | null; status: string; created_at: string };
@@ -38,8 +38,9 @@ export function deleteBrand(id: number) {
   fs.rmSync(brandDir(b.slug), { recursive: true, force: true });
 }
 
-export const listLookbooks = (brandId: number) => db().prepare("SELECT * FROM lookbooks WHERE brand_id=? ORDER BY version DESC").all(brandId) as Lookbook[];
-export const getLookbook = (id: number) => db().prepare("SELECT * FROM lookbooks WHERE id=?").get(id) as Lookbook | undefined;
+const place = (l: Lookbook | undefined): Lookbook | undefined => (l ? { ...l, source_path: rebase(l.source_path) ?? l.source_path, kit_path: l.kit_path ? rebase(l.kit_path) : l.kit_path } as Lookbook : l);
+export const listLookbooks = (brandId: number) => (db().prepare("SELECT * FROM lookbooks WHERE brand_id=? ORDER BY version DESC").all(brandId) as Lookbook[]).map((l) => place(l)!);
+export const getLookbook = (id: number) => place(db().prepare("SELECT * FROM lookbooks WHERE id=?").get(id) as Lookbook | undefined);
 
 export function addLookbook(brandId: number, pdf: Buffer): Lookbook {
   const b = getBrand(brandId);

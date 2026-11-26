@@ -49,7 +49,9 @@ async function pageSvgShapes(pdf: string, page: number, dir: string): Promise<Ra
   const out: RawShape[] = [];
   for (const m of svg.matchAll(/<path\b([^>]*?)\sd="([^"]+)"([^>]*)>/g)) {
     const attrs = m[1] + " " + m[3];
-    const fill = fillHex(/fill="([^"]+)"/.exec(attrs)?.[1]); const stroke = fillHex(/stroke="([^"]+)"/.exec(attrs)?.[1]);
+    // poppler 22 writes paint in a style="fill:rgb(..);" string, poppler 24+ in fill="rgb(..)" attributes: accept both
+    const paint = (name: string) => /* attribute form */ new RegExp(`\\s${name}="([^"]+)"`).exec(attrs)?.[1] ?? /* style form */ new RegExp(`(?:^|[;\\s"])${name}:\\s*([^;"]+)`).exec(attrs)?.[1];
+    const fill = fillHex(paint("fill")); const stroke = fillHex(paint("stroke"));
     const b = pathBox(m[2]); if (!b) continue;
     out.push({ x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0, fill, stroke, pts: b.pts });
   }

@@ -77,8 +77,9 @@ describe("resolveColour", () => {
   });
 });
 
+// needs a spec produced by a real ingest (samples/ is git-ignored), so it is skipped on a fresh clone
 describe("reconcileSpec keeps the model's work and adds everything parsed", () => {
-  it("attaches names/roles, rules, formats and the register to a stored spec", async () => {
+  it.skipIf(!fs.existsSync(path.resolve("samples/specs/small-print.spec.json")))("attaches names/roles, rules, formats and the register to a stored spec", async () => {
     const stored = JSON.parse(fs.readFileSync(path.resolve("samples/specs/small-print.spec.json"), "utf8"));
     const a = await analyseLookbook(fx("Small Print"));
     const spec = reconcileSpec(StyleSpec.parse(stored), a, { furniture: false });
