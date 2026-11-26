@@ -228,8 +228,10 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
       parts.push(`<div data-furniture="${f.what}" style="${css}white-space:nowrap;display:none">${text ?? ""}</div>`); // this sample does not show it, so it starts hidden (the pipeline hides absent furniture anyway)
     }
   }
+  // an option letter (A, B, C...) is a label, not an answer: boxed, at most 2 characters and much smaller than the boxed answers
+  const boxedMax = Math.max(...free.filter((b) => b.boxed).map((b) => b.px), 0), isMarker = (b: SkBlock) => !!b.boxed && b.text.trim().length <= 2 && b.px <= 0.6 * boxedMax;
   // slots: pair slots with blocks of the same kind, in reading order
-  const cand = free.filter((b) => !used.has(b) && !b.role.furniture && !(b.boxed && b.text.trim().length <= 3) && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
+  const cand = free.filter((b) => !used.has(b) && !b.role.furniture && !isMarker(b) && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
   const pairs: { s: number; b: number; score: number }[] = [];
   const byY = [...cand].sort((x, y) => x.y - y.y || x.x - y.x), cls = classes(byY), blockClass = (b: SkBlock) => cls.get(b) ?? "body";
   a.slots.forEach((s, si) => {

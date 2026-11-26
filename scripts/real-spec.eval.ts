@@ -6,7 +6,7 @@ const calls: string[] = [];
 vi.mock("@/lib/llm/router", () => ({ llmCall: async (o: any) => { calls.push(o.stage); if (o.stage === "ingest.decor") return { data: { archetypes: [], css_additions: "", summary: "stub" } }; throw new Error("no model for " + o.stage); } }));
 vi.mock("@/lib/llm/preflight", () => ({ assertCredits: async () => {} }));
 describe("compile with a live spec", () => {
-  it("scores", async () => {
+  it.skipIf(!process.env.EVAL_SPEC)("scores", async () => {
     const { createBrand, addLookbook, lookbookDir } = await import("@/lib/db/repo"); const { db } = await import("@/lib/db");
     const { fetchGoogleFont, fetchDevanagariPair } = await import("@/lib/ingest/fonts"); const { StyleSpec } = await import("@/lib/ingest/spec"); const { compileKit } = await import("@/lib/ingest/compile");
     const spec = StyleSpec.parse(JSON.parse(await fs.readFile(process.env.EVAL_SPEC!, "utf8")));
