@@ -1,7 +1,7 @@
 "use client";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BookOpen, Check, Code2, Cpu, History, Info, Layers, ListChecks, Palette, RefreshCw, ShieldCheck, Sparkles, Trash2, Upload } from "lucide-react";
+import { Wand2, ArrowLeft, BookOpen, Check, Code2, Cpu, History, Info, Layers, ListChecks, Palette, RefreshCw, ShieldCheck, Sparkles, Trash2, Upload } from "lucide-react";
 import Shell from "@/components/Shell";
 import { Badge, Modal, ProgressPanel, Skeleton, Tabs, btnDanger, btnGhost, btnPrimary, input, toast, useProgress } from "@/components/ui";
 import { api, inr, stream, usd } from "@/lib/client";
@@ -41,11 +41,25 @@ export default function BrandPage({ params }: { params: Promise<{ id: string }> 
   const [failed, setFailed] = useState("");
   const [rebuildOpen, setRebuildOpen] = useState(false);
   const [delCar, setDelCar] = useState<any | null>(null);
+  const [instr, setInstr] = useState(""), [target, setTarget] = useState("all"), [editing, setEditing] = useState(false), [editErr, setEditErr] = useState("");
+  const [editInfo, setEditInfo] = useState<{ edits: { at: string; archetypes: string[]; instruction: string; summary: string }[]; canUndo: boolean }>({ edits: [], canUndo: false });
   const [estimate, setEstimate] = useState<{ usd: number; inr: number; note: string } | null>(null);
   const [toDelete, setToDelete] = useState<Lb | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const prog = useProgress();
+  const editProg = useProgress();
+  const loadEdits = useCallback((lb: number) => api<any>(`/api/lookbooks/${lb}/kit-edit`).then(setEditInfo).catch(() => setEditInfo({ edits: [], canUndo: false })), []);
+  async function applyEdit(undo = false) {
+    if (!sel) return;
+    setEditing(true); setEditErr(""); editProg.reset();
+    try {
+      const r: any = await stream(`/api/lookbooks/${sel}/kit-edit`, undo ? { undo: true } : { instruction: instr, archetype: target }, editProg.push);
+      await loadDetail(sel); await loadEdits(sel); setStamp(Date.now());
+      if (undo) toast("Last change undone."); else { toast(r.summary || "Template updated."); setInstr(""); }
+    } catch (e: any) { setEditErr(e.message); }
+    setEditing(false);
+  }
 
   const loadBrand = useCallback(async () => {
     const r = await api<any>(`/api/brands/${id}`);
@@ -54,7 +68,7 @@ export default function BrandPage({ params }: { params: Promise<{ id: string }> 
   }, [id]);
   const loadDetail = useCallback(async (lb: number) => {
     const d = await api<Detail>(`/api/lookbooks/${lb}`);
-    setDetail(d); setDraft(d.spec ? structuredClone(d.spec) : null); setDirty(false); setStamp(Date.now()); setLoading(false);
+    setDetail(d); setDraft(d.spec ? structuredClone(d.spec) : null); setDirty(false); setStamp(Date.now()); setLoading(false); loadEdits(lb);
   }, []);
   useEffect(() => { loadBrand().catch((e) => toast(e.message, "err")); }, [loadBrand]);
   useEffect(() => { if (sel) loadDetail(sel).catch((e) => toast(e.message, "err")); else if (lookbooks.length === 0) setLoading(false); }, [sel, loadDetail, lookbooks.length]);
@@ -254,6 +268,29 @@ export default function BrandPage({ params }: { params: Promise<{ id: string }> 
               </div>
             );
           })()}
+          {detail.lookbook.has_kit && (
+            <div className="card mt-3 p-4" data-testid="kit-edit">
+              <h3 className="flex items-center gap-1.5 font-semibold"><Wand2 size={16} />Fix a template with instructions</h3>
+              <p className="mt-0.5 text-xs text-neutral-500">Say what is wrong and the template is changed in place, instead of being rebuilt. Costs about ₹2 to ₹6. Your change is kept when the templates are re-polished.</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[14rem_1fr]">
+                <select className={input} value={target} onChange={(e) => setTarget(e.target.value)} disabled={editing} aria-label="Template to change">
+                  <option value="all">Any template (let it decide)</option>
+                  {draft.archetypes.map((a: any) => <option key={a.id} value={a.id}>{a.id}</option>)}
+                </select>
+                <textarea className={input} rows={2} value={instr} onChange={(e) => setInstr(e.target.value)} disabled={editing} placeholder="e.g. Make the quiz option text bigger and give the boxes more space between them" aria-label="Instruction" />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button className={btnPrimary} disabled={editing || busy || instr.trim().length < 4} onClick={() => applyEdit(false)}><Wand2 size={15} />{editing ? "Working…" : "Make the change"}</button>
+                {editInfo.canUndo && <button className={btnGhost} disabled={editing || busy} onClick={() => applyEdit(true)}>Undo last change</button>}
+              </div>
+              {(editing || editErr) && <div className="mt-3 max-w-xl"><ProgressPanel log={editProg.log} running={editing} error={editErr || undefined} flow="edit" /></div>}
+              {editInfo.edits.length > 0 && (
+                <ul className="mt-3 space-y-1.5 border-t border-neutral-100 pt-3 text-xs" data-testid="kit-edit-history">
+                  {[...editInfo.edits].reverse().slice(0, 6).map((e, i) => <li key={i}><span className="font-medium">{e.instruction}</span><span className="text-neutral-500"> → {e.summary}{e.archetypes.length ? ` (${e.archetypes.join(", ")})` : ""}</span></li>)}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-2 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {draft.archetypes.map((a: any, ai: number) => (
               <div key={a.id} className="card overflow-hidden" data-testid="archetype-card">

@@ -47,3 +47,13 @@ describe("data folder can move", () => {
     expect(rebase(null)).toBeNull();
   });
 });
+
+describe("template edit record", () => {
+  it("lists the templates changed by instruction", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cs-ke-"));
+    fs.writeFileSync(path.join(dir, "kit.edits.json"), JSON.stringify([{ at: "x", archetypes: ["quiz", "cover"], instruction: "bigger", summary: "s" }, { at: "y", archetypes: ["quiz"], instruction: "more", summary: "t" }]));
+    const { editedTemplates } = await import("@/lib/ingest/kitlog");
+    expect([...(await editedTemplates(dir))].sort()).toEqual(["cover", "quiz"]);
+    expect((await editedTemplates(path.join(dir, "missing"))).size).toBe(0);
+  });
+});

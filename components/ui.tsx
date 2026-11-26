@@ -35,12 +35,13 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
 
 /** Ordered pipeline steps so people see what happens, what is done and what is next: never a bare spinner. */
 export const STEPS = {
+  edit: [["edit", "Making the change"], ["kit", "Re-checking the templates"], ["fidelity", "Checking fidelity"], ["done", "Ready"]],
   ingest: [["extract", "Reading the PDF"], ["vision", "Understanding the design"], ["fonts", "Fetching fonts"], ["geometry", "Measuring the sample posts"], ["kit", "Building the templates"], ["fidelity", "Checking fidelity"], ["done", "Ready"]],
   generate: [["copy", "Writing the copy"], ["validate", "Checking the rules"], ["render", "Rendering slides"], ["repair", "Fixing what failed"], ["cover", "Choosing the best cover"], ["export", "Building files"], ["review", "Checking every guideline"], ["done", "Done"]],
 } as const;
 export const STAGE_LABEL: Record<string, string> = Object.fromEntries([...STEPS.ingest, ...STEPS.generate, ["spec", "Style read"]] as unknown as [string, string][]);
 
-export function ProgressPanel({ log, running, error, flow = "generate" }: { log: Progress[]; running: boolean; error?: string; flow?: "ingest" | "generate" }) {
+export function ProgressPanel({ log, running, error, flow = "generate" }: { log: Progress[]; running: boolean; error?: string; flow?: "ingest" | "generate" | "edit" }) {
   const steps = STEPS[flow], seen = new Set(log.map((l) => l.stage)), last = log[log.length - 1];
   const [t0] = useState(() => Date.now()), [now, setNow] = useState(Date.now());
   useEffect(() => { if (!running) return; const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, [running]);

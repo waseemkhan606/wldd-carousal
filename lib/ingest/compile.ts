@@ -13,6 +13,7 @@ import { findLogoBox, cropLogo, type LogoBox } from "./logo";
 import { alignArchetype, sanitizeHex, swapLogo, enforceFurniture, fixContrast, enforceReadable } from "./autoalign";
 const W0 = 1080;
 import { assertCredits } from "../llm/preflight";
+import { editedTemplates } from "./kitlog";
 import { polishStamps, enforceClearance, clearStaticText, floorTextSizes, addEdgeBands, harmoniseFurniture, enforceBackdropContrast, liftSlots, dedupeFurniture, nowrapPlaceholders, thickenRuledLines, rulerGrid, usesGrid, ruledLineHeights, snapToRuledGrid, leftAlignStray, anchorLeft, balanceVertical } from "./polish";
 import { verticalLines, diffLines, verticalLineOverride, lineOpacity } from "./decor";
 import { renderSlide, type RenderDiag } from "../render/renderer";
@@ -159,7 +160,8 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   const rounds: KitReport["rounds"] = [{ round: 0, mean: best.mean, min: best.min, kept: true }];
   // free deterministic solver first: staged cycles (shape, then position), per-archetype acceptance
   const alignLog: string[] = [];
-  const edit = (k: KitOutput, ev: typeof best, mode: "shape" | "move") => { const nk: KitOutput = JSON.parse(JSON.stringify(k)); let n = 0; for (const a of nk.archetypes) { const m = ev.metrics[a.id]; if (!m || !ev.rendered[a.id]) continue; const r = alignArchetype(a.html, m, ev.rendered[a.id].diag, spec, mode); a.html = r.html; n += r.changes.length; if (r.changes.length) alignLog.push(`${mode} ${a.id}: ${r.changes.join(", ")}`); } return { nk, n }; };
+  const ownerEdited = await editedTemplates(kitDir); // templates the owner changed by instruction are not pulled back towards the sample
+  const edit = (k: KitOutput, ev: typeof best, mode: "shape" | "move") => { const nk: KitOutput = JSON.parse(JSON.stringify(k)); let n = 0; for (const a of nk.archetypes) { const m = ev.metrics[a.id]; if (!m || !ev.rendered[a.id] || ownerEdited.has(a.id)) continue; const r = alignArchetype(a.html, m, ev.rendered[a.id].diag, spec, mode); a.html = r.html; n += r.changes.length; if (r.changes.length) alignLog.push(`${mode} ${a.id}: ${r.changes.join(", ")}`); } return { nk, n }; };
   const evalKit = async (k: KitOutput) => { const m = await writeKit(kitDir, spec, k, fontsCss, promptVersion); return { m, ev: await evaluate(k, await renderSamples(kitDir, m, spec)) }; };
   // furniture that this archetype's own reference doesn't show is hidden unconditionally (correctness, not a score gamble)
   if (best.scored) {

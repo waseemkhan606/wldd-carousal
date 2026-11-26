@@ -9,7 +9,7 @@ Upload a brand's look book (a PDF) once. The studio reads it, saves it, and anyo
    - a vision model reads the design, and an HTML/CSS **template kit** is built from the measured geometry of the look book's own sample posts;
    - automatic fixes run on the kit (margins, stamps, ruled paper, edge elements, readable colours), then its fidelity to the look book is scored.
 
-   The **Guidelines** tab lists every rule found, with its page and verbatim quote. The **Templates** tab shows each template with a quality score and a free "Re-polish" button.
+   The **Guidelines** tab lists every rule found, with its page and verbatim quote. The **Templates** tab shows each template with a quality score, a free "Re-polish" button, and **"Fix a template with instructions"**: describe what is wrong ("make the quiz options bigger") and that template is edited in place for a few rupees, with undo, instead of rebuilding everything.
 2. **Create.** Pick a brand, a topic, a language (English, हिंदी, Hinglish) and either a **carousel** (3 to 10 slides) or a **single post** (e.g. the look book's quiz). A carousel costs about ₹8 to ₹13.
 3. **Result.** Instagram PDF and PNG ZIP, LinkedIn PDF (1080×1350), captions, and the cost. The side panel is an **adherence checklist**: each guideline with its status, evidence and the look book page. Edit any text inline (₹0), regenerate one slide without touching the others, or delete a carousel.
 
