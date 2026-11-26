@@ -13,7 +13,7 @@ const MAX = 128 * 1024 * 1024;
 
 export type Box = { x: number; y: number; w: number; h: number };
 export type GWord = Box & { text: string };
-export type GLine = Box & { text: string; color: string; align: "left" | "center" | "right" | "single"; estFontPx: number; font?: string; weight?: number; tracked?: boolean };
+export type GLine = Box & { text: string; color: string; align: "left" | "center" | "right" | "single"; estFontPx: number; font?: string; weight?: number; tracked?: boolean; rotationDeg?: number };
 export type GShape = Box & { fill?: string; stroke?: string; rotationDeg?: number };
 export type PageGeometry = {
   page: number; scale: number; offsetY: number; offsetMethod: "svg-fill" | "full-page" | "unknown";

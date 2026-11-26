@@ -8,6 +8,8 @@ import { generateKit, repairKit, writeKit, validateKitStatic, type KitOutput, ty
 import { scoreFidelity, sideBySide, downscale } from "./fidelity";
 import { extractGeometry, findFrames, pickFrames, describeGeometry, type PageGeometry } from "./geometry";
 import { measure, type Metrics } from "./measure";
+import { skeletonKit } from "./skeleton";
+import { decorPass } from "./decor-pass";
 import { pdfInfo } from "./pdf";
 import { findLogoBox, cropLogo, type LogoBox } from "./logo";
 import { alignArchetype, sanitizeHex, swapLogo, enforceFurniture, fixContrast, enforceReadable } from "./autoalign";
@@ -99,13 +101,28 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   const stored = (opts.reuse || process.env.KIT_REUSE) ? await fs.readFile(path.join(kitDir, "kit.raw.json"), "utf8").catch(() => fs.readFile(path.join(kitDir, "kit.source.json"), "utf8")).then((t) => JSON.parse(t) as KitOutput).catch(() => null) : null; // the model's own output, before any automatic fix
   const gen = (k: number) => Promise.allSettled(Array.from({ length: k }, () => generateKit({ spec, pdf: lb.source_path, visionDir: path.join(dir, "vision"), lookbookId, geometry: geometryText })));
   const pick = (settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[]) => settled.flatMap((r) => (r.status === "fulfilled" ? [{ kit: clean(r.value.kit, spec).kit, promptVersion: r.value.promptVersion }] : []));
-  if (!stored) await assertCredits(Number(process.env.KIT_PREFLIGHT_USD ?? 1.0), "building the templates");
-  const settled = stored ? [{ status: "fulfilled" as const, value: { kit: stored, promptVersion: "reused" } }] : await gen(FIRST);
+  // Skeleton first: the layout of every sample post is already measured exactly from the PDF, so templates are BUILT from it for free.
+  // The model is only asked for what geometry cannot give (decoration; templates that have no sample post to measure).
+  const skel = stored || process.env.KIT_SKELETON === "0" ? null : await skeletonKit(spec, (id) => geoBy.get(id), logoBox && logoFurn ? { what: logoFurn.what, box: logoBox } : null).catch((e) => { warnings.push(`Skeleton skipped (${String(e.message).slice(0, 100)})`); return null; });
+  const skelUsable = !!skel && skel.covered.length > 0;
+  if (skel) { repairs.push(`skeleton: ${skel.covered.length}/${spec.archetypes.length} templates built from the PDF's measured layout (no model call)${skel.notes.length ? "; " + skel.notes.join("; ") : ""}`); if (skelUsable) progress("kit", `Built ${skel.covered.length} of ${spec.archetypes.length} templates from the measured layout`); }
+  let settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[];
+  if (stored) settled = [{ status: "fulfilled" as const, value: { kit: stored, promptVersion: "reused" } }];
+  else if (skelUsable && !skel!.missing.length) settled = [{ status: "fulfilled" as const, value: { kit: skel!.kit, promptVersion: "skeleton-1" } }];
+  else {
+    await assertCredits(Number(process.env.KIT_PREFLIGHT_USD ?? 1.0), "building the templates");
+    if (skelUsable) { // the model builds only the templates that have no measurable sample
+      const sub = { ...spec, archetypes: spec.archetypes.filter((a) => skel!.missing.includes(a.id)) };
+      const gt = logoNote + sub.archetypes.filter((a) => geoFor(a)).map((a) => `## Reference geometry for archetype "${a.id}" (look book page ${a.source_page})\n${describeGeometry(geoFor(a)!)}`).join("\n\n");
+      progress("kit", `Generating the ${sub.archetypes.length} template(s) that have no measurable sample`);
+      settled = (await Promise.allSettled([generateKit({ spec: sub, pdf: lb.source_path, visionDir: path.join(dir, "vision"), lookbookId, geometry: gt })])).map((r) => r.status === "fulfilled" ? { status: "fulfilled" as const, value: { kit: { css: r.value.kit.css + "\n" + skel!.kit.css, archetypes: [...skel!.kit.archetypes, ...r.value.kit.archetypes] }, promptVersion: r.value.promptVersion + "+skeleton" } } : r);
+    } else settled = await gen(FIRST);
+  }
   let cands = pick(settled);
   if (!cands.length) throw new Error(`Kit generation failed: ${(settled[0] as PromiseRejectedResult).reason?.message ?? "unknown error"}`);
   const promptVersion = cands[0].promptVersion;
   const meanScore = (ms: Record<string, Metrics | null>, r: Rendered) => { const v = spec.archetypes.map((a) => (ms[a.id] ? ms[a.id]!.score - Math.min(24, 8 * (r[a.id]?.problems.length ?? 0)) : null)).filter((x): x is number => x !== null); return v.length ? mean(v) : 100; };
-  let kit = cands[0].kit, bestScore = -1, bestHasProblems = false;
+  let kit = cands[0].kit, bestScore = -1, bestHasProblems = false, bestFrom = cands[0].promptVersion;
   const scoreAll = async (list: typeof cands, offset: number) => {
     for (const [i, c] of list.entries()) {
       if (validateKitStatic(c.kit, spec).length) { warnings.push(`Candidate ${offset + i + 1} violated kit constraints and was skipped.`); continue; }
@@ -116,12 +133,12 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       for (const a of spec.archetypes) { const g = geoFor(a); ms[a.id] = g && r[a.id] ? await measure(r[a.id].png, r[a.id].diag, g) : null; }
       const sc = meanScore(ms, r);
       repairs.push(`candidate ${offset + i + 1}: measured mean ${sc.toFixed(1)}`);
-      if (sc > bestScore) { bestScore = sc; kit = c.kit; bestHasProblems = Object.values(r).some((x) => x.problems.length > 0); }
+      if (sc > bestScore) { bestScore = sc; kit = c.kit; bestFrom = c.promptVersion; bestHasProblems = Object.values(r).some((x) => x.problems.length > 0); }
     }
   };
   if (!stored) {
     await scoreAll(cands, 0);
-    if (bestScore < BAR && N > cands.length) { progress("kit", `First kit scored ${bestScore.toFixed(0)}, below ${BAR}: trying ${N - cands.length} more`); const more = pick(await gen(N - cands.length)); await scoreAll(more, cands.length); cands = [...cands, ...more]; }
+    if (bestScore < BAR && N > cands.length) { progress("kit", `First kit scored ${bestScore.toFixed(0)}, below ${BAR}: trying ${N - cands.length} more`); await assertCredits(Number(process.env.KIT_PREFLIGHT_USD ?? 1.0), "building more candidate templates"); const more = pick(await gen(N - cands.length)); await scoreAll(more, cands.length); cands = [...cands, ...more]; }
   }
   // ---- constraint pass (static rules, render checks): one repair ----
   let manifest!: KitManifest, rendered!: Rendered;
@@ -138,7 +155,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     if (stored && !staticIssues.length) { warnings.push(...issues); break; } // reuse mode: no paid repair
     if (round === 1) { if (staticIssues.length) throw new Error(`Kit still violates constraints after one repair:\n${staticIssues.join("\n")}`); warnings.push(...issues); break; }
     progress("kit", `Repairing kit (${issues.length} constraint issues)`);
-    repairs.push(`constraints: ${issues.length} issues`);
+    repairs.push(`constraints: ${issues.length} issues: ${issues.slice(0, 3).join(" | ").slice(0, 300)}`);
     try { kit = clean(await repairKit({ spec, kit, issues, lookbookId, stage: "ingest.kit_repair", geometry: geometryText }), spec).kit; }
     catch (e: any) { if (staticIssues.length) throw e; warnings.push(`Constraint repair failed (${String(e.message).slice(0, 120)}); kept the unrepaired kit.`); break; }
   }
@@ -158,6 +175,26 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   await fs.writeFile(path.join(kitDir, "kit.raw.json"), JSON.stringify(kit)).catch(() => {}); // what the model built (after the one constraint repair): re-polishing always starts from this, never from an already polished kit
   let best = await evaluate(kit, rendered);
   const rounds: KitReport["rounds"] = [{ round: 0, mean: best.mean, min: best.min, kept: true }];
+  // decoration: only for kits built from the skeleton, only when the look book lists decorative elements, and kept only if the measured score improves
+  if (!stored && /skeleton/.test(bestFrom) && process.env.KIT_DECOR !== "0" && best.scored && spec.elements.some((e) => e.enabled !== false)) {
+    try {
+      await assertCredits(0.3, "adding the decoration");
+      progress("kit", "Adding the decoration the PDF only draws as effects");
+      const seen = new Set<string>();
+      const ids = spec.archetypes.filter((a) => best.metrics[a.id] && geoFor(a)).sort((x, y) => best.metrics[x.id]!.pixel - best.metrics[y.id]!.pixel).filter((a) => !seen.has(a.background_token) && seen.add(a.background_token)).slice(0, 3).map((a) => a.id);
+      const images = await Promise.all(ids.map((id) => sideBySide(best.rendered[id].png, geoBy.get(id)!.referencePng)));
+      const res = await decorPass({ spec, kit, images, imageIds: ids, lookbookId });
+      if (!res) { warnings.push("The decoration pass returned nothing valid; the templates have no decoration beyond what the PDF draws as vector shapes."); }
+      else {
+        const m2 = await writeKit(kitDir, spec, res.kit, fontsCss, promptVersion), r2 = await renderSamples(kitDir, m2, spec), ev = await evaluate(res.kit, r2);
+        const nProb = (r: Rendered) => Object.values(r).reduce((t, x) => t + x.problems.length, 0);
+        const better = ev.mean > best.mean + 0.3 && ev.min >= best.min - 2 && nProb(r2) <= nProb(best.rendered);
+        repairs.push(`decoration (${res.changed.join(", ") || "css only"}): mean ${best.mean.toFixed(1)} → ${ev.mean.toFixed(1)}, ${better ? "kept" : "discarded"}: ${res.summary}`);
+        if (better) { kit = res.kit; best = ev; manifest = m2; rendered = r2; await fs.writeFile(path.join(kitDir, "kit.raw.json"), JSON.stringify(kit)).catch(() => {}); rounds.push({ round: -100, mean: ev.mean, min: ev.min, kept: true }); }
+        else { manifest = await writeKit(kitDir, spec, best.kit, fontsCss, promptVersion); warnings.push(`The decoration pass did not improve the measured score (${ev.mean.toFixed(1)} vs ${best.mean.toFixed(1)}) and was discarded.`); }
+      }
+    } catch (e: any) { warnings.push(`Decoration pass skipped (${String(e.message).slice(0, 120)}).`); manifest = await writeKit(kitDir, spec, best.kit, fontsCss, promptVersion); }
+  }
   // free deterministic solver first: staged cycles (shape, then position), per-archetype acceptance
   const alignLog: string[] = [];
   const ownerEdited = await editedTemplates(kitDir); // templates the owner changed by instruction are not pulled back towards the sample
@@ -239,6 +276,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
     rounds.push({ round, mean: ev.mean, min: ev.min, kept: better });
     if (better) { best = ev; manifest = m2; } else { manifest = await writeKit(kitDir, spec, best.kit, fontsCss, promptVersion); warnings.push(`Repair round ${round} did not improve the measured score (${ev.mean.toFixed(1)} vs ${best.mean.toFixed(1)}); kept the previous kit.`); break; }
   }
+  const skelIds = new Set<string>(skel && /skeleton/.test(bestFrom) ? skel.covered : []);
   // template polish, always: consistent alignment, stamps fitted, text clear of rule lines and inside the margins, content balanced vertically, paper lines visible
   {
     const kindsOf = (id: string) => Object.fromEntries((spec.archetypes.find((x) => x.id === id)?.slots ?? []).map((x) => [x.name, x.kind]));
@@ -263,7 +301,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       const r = best.rendered[a.id]; if (!r) continue;
       const kinds = kindsOf(a.id), rules = await verticalLines(r.png).catch(() => []);
       const ruleX = rules.filter((l) => l.thick <= 10 && l.x > 40 && l.x < W0 / 2).map((l) => l.x + l.thick).sort((x, y) => y - x)[0] ?? 0, left = Math.max(mgL, ruleX ? ruleX + 28 : 0);
-      const mine = ownerEdited.has(a.id), skip = () => ({ html: a.html, changes: [] as string[] }); // an instruction edit is final: layout polish never rewrites it
+      const mine = ownerEdited.has(a.id) || skelIds.has(a.id), skip = () => ({ html: a.html, changes: [] as string[] }); // an instruction edit is final, and a template built from the measured sample keeps the look book's own layout: positional polish never rewrites either
       const o0 = mine ? skip() : anchorLeft(a.html, r.diag, stray[a.id] ?? [], left, kinds); a.html = o0.html;
       const o1 = mine ? skip() : enforceClearance(a.html, r.diag, spec, rules, kinds, stray[a.id] ?? []); a.html = o1.html;
       const o3 = mine ? skip() : clearStaticText(a.html, nk.css, spec, rules); a.html = o3.html;

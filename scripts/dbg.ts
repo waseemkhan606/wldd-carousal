@@ -1,0 +1,5 @@
+import { pdfInfo } from "../lib/ingest/pdf"; import { findFrames, extractGeometry } from "../lib/ingest/geometry"; import { toBlocks, classify, prepareLines } from "../lib/ingest/skeleton";
+(async () => { const [name, page] = [process.argv[2], Number(process.argv[3])]; const pdf = `fixtures/${name} - sample look book.pdf`; const info = await pdfInfo(pdf); const f = (await findFrames(pdf, page, info))[0]; const g = (await extractGeometry(pdf, page, info, f))!;
+  console.log("raw lines"); for (const l of g.lines) console.log(`  ${Math.round(l.x)},${Math.round(l.y)} ${Math.round(l.w)}x${Math.round(l.h)} ${l.estFontPx}px ${l.font} ${l.color} "${l.text}"`);
+  console.log("prepared"); for (const l of prepareLines(g)) console.log(`  ${Math.round(l.x)},${Math.round(l.y)} ${Math.round(l.w)}x${Math.round(l.h)} ${l.estFontPx}px rot=${l.rotationDeg ?? ""} "${l.text}"`);
+  for (const b of classify(toBlocks(prepareLines(g)), g.shapes)) console.log(`  [${b.role.name || "static"}:${b.role.kind}] ${b.px}px tracked=${b.tracked} upper=${b.upper} "${b.text.slice(0, 50)}"`); })();
