@@ -318,7 +318,7 @@ export function addEdgeBands(archetypes: { id: string; html: string }[], css: st
   for (const a of archetypes) {
     if (a.html.includes("el-edge-band")) continue; // already ours
     const cls0 = /class="slide[^"]*\bbg-([a-z0-9-]+)/.exec(a.html)?.[1];
-    const tok = spec.archetypes.find((x) => x.id === a.id)?.background_token ?? cls0 ?? "";
+    const tok = (spec.archetypes ?? []).find((x) => x.id === a.id)?.background_token ?? cls0 ?? "";
     const bg = (spec.colors.find((c) => c.token === tok) ?? spec.colors.find((c) => cls0 && (c.token === cls0 || c.token.endsWith(`-${cls0}`) || cls0.endsWith(`-${c.token}`))))?.hex; if (!bg) continue;
     if (contrastRatio(light.hex, bg) < 3) continue; // paper-on-paper: nothing to see
     // the model's own drawing of this element (often a faint dotted line) is replaced by ours
