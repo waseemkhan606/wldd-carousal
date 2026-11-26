@@ -149,12 +149,14 @@ import { inkColor } from "./geometry";
 import type { KitOutput } from "./kit";
 
 type SpecArch = StyleSpec["archetypes"][number];
+export type SlotDef = { name: string; kind: string; max_words: number; max_chars: number; optional: boolean };
 type Cls = "head" | "tag" | "cta" | "stamp" | "list" | "body";
 export type Furn = "counter" | "logo" | "handle" | "brand" | "other";
 
 export const furnKind = (what: string): Furn => /\bcounter\b|\bcount\b|slide ?(no|num|n)\b|pagination|page ?(no|num)|\bindex\b|\d ?\/ ?\d/i.test(what) ? "counter" : /logo|mark|emblem|icon|badge|monogram/i.test(what) ? "logo" : /handle|@|username|account|url|link/i.test(what) ? "handle" : /brand|wordmark|name|publisher|footer/i.test(what) ? "brand" : "other";
 export const slotClass = (s: { name: string; kind: string }): Cls => {
   const by = (t: string): Cls | null => /^(stamp|stamp_text)$/.test(t) ? "stamp" : /^(cta|call_to_action|action)$/.test(t) ? "cta" : /^(tag|label|kicker|eyebrow|category|pill|badge)$/.test(t) ? "tag" : /^(list|option|options|choice|answer|item|step|bullets?)$/.test(t) ? "list" : /^(headline|title|number|stat|figure|hero|quote|question|subhead|subheadline|big_number|heading)$/.test(t) ? "head" : /^(body|text|paragraph|copy|description|caption)$/.test(t) ? "body" : null;
+  if (/^(option|choice|answer)[_ -]?[a-z0-9]*$/i.test(s.name)) return "list"; // a slot called option_a is an option whatever its kind says
   const k = by(s.kind.toLowerCase().replace(/[\s-]+/g, "_")); if (k) return k;
   const t = `${s.kind} ${s.name}`.toLowerCase();
   return /sub-?title|subtext|caption|description|summary|paragraph|body|explanation|blurb|note|maths|example/.test(t) ? "body" : /stamp/.test(t) ? "stamp" : /cta|swipe|call.?to/.test(t) ? "cta" : /tag|kicker|eyebrow|label|category|pill|section|topic/.test(t) ? "tag" : /option|choice|answer|item|step|list|bullet/.test(t) ? "list" : /head|title|number|stat|figure|hero|quote|question/.test(t) ? "head" : "body";
@@ -164,7 +166,7 @@ function classes(blocks: SkBlock[]): Map<SkBlock, Cls> {
   const bodyPx = blocks.filter((b) => b.role.kind === "body" && !b.boxed).map((b) => b.px).sort((x, y) => x - y), med = bodyPx[Math.floor(bodyPx.length / 2)] ?? 0;
   return new Map(blocks.map((b) => {
     const words = b.text.trim().split(/\s+/).length;
-    const c: Cls = b.role.static && /→|swipe|follow|save|share|link in bio|read more/i.test(b.text) ? "cta" : b.boxed ? (b.role.name.startsWith("stamp") ? "stamp" : "list")
+    const c: Cls = b.role.static && /→|swipe|follow|save|share|link in bio|read more/i.test(b.text) ? "cta" : b.boxed && b.role.kind === "tag" ? "tag" : b.boxed ? (b.role.name.startsWith("stamp") ? "stamp" : "list")
       : b.rotationDeg || (b.tracked && b.upper && words <= 4 && b.y > 200 && b.role.kind !== "tag" && !b.role.static) ? "stamp"
       : b.role.kind === "headline" ? "head" : b.role.kind === "tag" ? "tag" : b.role.kind === "cta" ? "cta"
       : med && b.px >= 1.45 * med && words <= 12 ? "head" : "body";
@@ -196,7 +198,7 @@ function boxCss(b: SkBlock, spec: StyleSpec, bgHex: string): string {
 const corner = (position: string) => ({ right: /right/i.test(position), bottom: /bottom|foot/i.test(position) });
 
 /** One archetype from its geometry and the spec's slots/furniture. Returns null (with a reason) when the geometry can't honour the spec. */
-export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, visible: (b: SBlock) => string | undefined, logo?: { what: string; box: { x: number; y: number; w: number; h: number } } | null): { html: string; sample_slots: Record<string, string> } | { fail: string } {
+export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, visible: (b: SBlock) => string | undefined, logo?: { what: string; box: { x: number; y: number; w: number; h: number } } | null): { html: string; sample_slots: Record<string, string>; extra: SlotDef[] } | { fail: string } {
   const bgHex = spec.colors.find((c) => c.token === a.background_token)?.hex ?? "#FFFFFF";
   const all: SkBlock[] = classify(toBlocks(prepareLines(g)), g.shapes).map((b) => ({ ...b, visible: visible(b) }));
   const inLogo = (b: { x: number; y: number; w: number; h: number }) => !!logo && b.x >= logo.box.x - 14 && b.y >= logo.box.y - 14 && b.x + b.w <= logo.box.x + logo.box.w + 14 && b.y + b.h <= logo.box.y + logo.box.h + 14;
@@ -227,7 +229,7 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
     }
   }
   // slots: pair slots with blocks of the same kind, in reading order
-  const cand = free.filter((b) => !used.has(b) && !b.role.furniture && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
+  const cand = free.filter((b) => !used.has(b) && !b.role.furniture && !(b.boxed && b.text.trim().length <= 3) && !(b.role.static && b.y >= 1130 && !/→|swipe|follow|save|share|link in bio|read more/i.test(b.text)));
   const pairs: { s: number; b: number; score: number }[] = [];
   const byY = [...cand].sort((x, y) => x.y - y.y || x.x - y.x), cls = classes(byY), blockClass = (b: SkBlock) => cls.get(b) ?? "body";
   a.slots.forEach((s, si) => {
@@ -262,30 +264,40 @@ export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, v
     parts.push(`<div data-slot="${s.name}" data-max-size="${b.px}" data-min-size="${Math.max(14, r(b.px * 0.55))}" style="${boxCss(b, spec, bgHex)}"></div>`);
   }
   // what is left: small fixed text (a footer, an option letter) stays as static text; copy-like leftovers are dropped, never frozen into the template
+  const extra: SlotDef[] = [];
+  const taken = new Set([...a.slots.map((x) => x.name)]);
+  const KIND: Record<Cls, string> = { head: "headline", tag: "tag", cta: "cta", stamp: "stamp_text", list: "body", body: "body" }, BASE: Record<Cls, string> = { head: "subhead", tag: "tag", cta: "cta", stamp: "stamp_text", list: "body", body: "body" };
   for (const b of free) {
     if (used.has(b) || b.role.furniture) continue;
-    if (b.text.trim().length <= 3 || (b.role.static && b.y >= 1130)) parts.push(`<div style="${boxCss(b, spec, bgHex)}">${esc(b.text)}</div>`);
+    if (b.text.trim().length <= 3 || (b.role.static && b.y >= 1130)) { parts.push(`<div style="${boxCss(b, spec, bgHex)}">${esc(b.text)}</div>`); continue; }
+    // copy the spec has no slot for: it becomes an optional slot, so the template keeps that line instead of freezing or losing it
+    if (extra.length >= 2 || b.boxed) continue;
+    const bc = blockClass(b); let name = BASE[bc], n = 1; while (taken.has(name)) name = `${BASE[bc]}_${++n}`; taken.add(name);
+    const words = b.text.trim().split(/\s+/).length;
+    extra.push({ name, kind: KIND[bc], max_words: Math.max(4, Math.ceil(words * 1.6)), max_chars: Math.max(24, Math.ceil(b.text.length * 1.7)), optional: true });
+    sample[name] = b.text;
+    parts.push(`<div data-slot="${name}" data-max-size="${b.px}" data-min-size="${Math.max(14, r(b.px * 0.55))}" style="${boxCss(b, spec, bgHex)}"></div>`);
   }
   const shapes = g.shapes.filter((s) => !(s.w > 1000 && s.h > 1200) && !inLogo(s)).map((s) => {
     const fc = s.fill ? nearestColor(s.fill, spec) : undefined, sc = s.stroke ? nearestColor(s.stroke, spec) : undefined;
     return `<div style="position:absolute;left:${r(s.x)}px;top:${r(s.y)}px;width:${r(s.w)}px;height:${r(s.h)}px;${fc ? `background:var(${colorVar(fc.token)});` : ""}${sc ? `border:3px solid var(${colorVar(sc.token)});` : ""}${s.rotationDeg ? `transform:rotate(${s.rotationDeg}deg);` : ""}"></div>`;
   });
-  return { html: `<div class="slide" style="position:relative;width:1080px;height:1350px;overflow:hidden;background:var(${colorVar(a.background_token)})">\n  ${shapes.join("\n  ")}\n  ${parts.join("\n  ")}\n</div>`, sample_slots: sample };
+  return { html: `<div class="slide" style="position:relative;width:1080px;height:1350px;overflow:hidden;background:var(${colorVar(a.background_token)})">\n  ${shapes.join("\n  ")}\n  ${parts.join("\n  ")}\n</div>`, sample_slots: sample, extra };
 }
 
-export type SkelKit = { kit: KitOutput; covered: string[]; missing: string[]; notes: string[] };
+export type SkelKit = { kit: KitOutput; covered: string[]; missing: string[]; notes: string[]; extra: Record<string, SlotDef[]> };
 /** Every archetype that has measured geometry and can honour the spec; the rest are left for the model. No model call here. */
 export async function skeletonKit(spec: StyleSpec, geoOf: (id: string) => PageGeometry | undefined, logo?: { what: string; box: { x: number; y: number; w: number; h: number } } | null): Promise<SkelKit> {
-  const archetypes: KitOutput["archetypes"] = [], covered: string[] = [], missing: string[] = [], notes: string[] = [];
+  const archetypes: KitOutput["archetypes"] = [], covered: string[] = [], missing: string[] = [], notes: string[] = [], extra: Record<string, SlotDef[]> = {};
   for (const a of spec.archetypes) {
     const g = geoOf(a.id);
     if (!g) { missing.push(a.id); notes.push(`${a.id}: no sample geometry`); continue; }
     const raw = await sharp(g.referencePng).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const out = skeletonForSpec(g, spec, a, (b) => inkColor(raw.data, raw.info.width, b), logo);
     if ("fail" in out) { missing.push(a.id); notes.push(`${a.id}: ${out.fail}`); continue; }
-    archetypes.push({ id: a.id, html: out.html, sample_slots: out.sample_slots }); covered.push(a.id);
+    archetypes.push({ id: a.id, html: out.html, sample_slots: out.sample_slots }); covered.push(a.id); if (out.extra.length) extra[a.id] = out.extra;
   }
-  return { kit: { css: "[data-slot] em{font-style:inherit;font-weight:inherit}", archetypes }, covered, missing, notes };
+  return { kit: { css: "[data-slot] em{font-style:inherit;font-weight:inherit}", archetypes }, covered, missing, notes, extra };
 }
 
 

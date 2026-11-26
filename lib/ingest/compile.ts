@@ -38,9 +38,9 @@ async function renderSamples(kitDir: string, manifest: KitManifest, spec: StyleS
   return out;
 }
 const allProblems = (r: Rendered) => Object.entries(r).flatMap(([id, x]) => x.problems.map((p) => `[${id}] ${p}`));
-function clean(kit: KitOutput, spec: StyleSpec): { kit: KitOutput; replaced: number } {
+function clean(kit: KitOutput, spec: StyleSpec, keepStamps: Set<string> = new Set()): { kit: KitOutput; replaced: number } {
   const r = sanitizeHex(kit.css, kit.archetypes.map((a) => a.html), spec);
-  return { kit: { css: r.css, archetypes: kit.archetypes.map((a, i) => { const kinds = Object.fromEntries((spec.archetypes.find((x) => x.id === a.id)?.slots ?? []).map((x) => [x.name, x.kind])); return { ...a, html: polishStamps(r.htmls[i], kinds).html }; }) }, replaced: r.replaced };
+  return { kit: { css: r.css, archetypes: kit.archetypes.map((a, i) => { const kinds = Object.fromEntries((spec.archetypes.find((x) => x.id === a.id)?.slots ?? []).map((x) => [x.name, x.kind])); return { ...a, html: keepStamps.has(a.id) ? r.htmls[i] : polishStamps(r.htmls[i], kinds).html }; }) }, replaced: r.replaced };
 }
 const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
 
@@ -99,12 +99,23 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
   progress("kit", FIRST > 1 ? `Generating ${FIRST} candidate kits` : "Generating the templates");
   // dev switch: re-run alignment/decoration/measurement on the stored kit without paying for generation again
   const stored = (opts.reuse || process.env.KIT_REUSE) ? await fs.readFile(path.join(kitDir, "kit.raw.json"), "utf8").catch(() => fs.readFile(path.join(kitDir, "kit.source.json"), "utf8")).then((t) => JSON.parse(t) as KitOutput).catch(() => null) : null; // the model's own output, before any automatic fix
+  const skelCovered: string[] = []; // filled once the skeleton has run
   const gen = (k: number) => Promise.allSettled(Array.from({ length: k }, () => generateKit({ spec, pdf: lb.source_path, visionDir: path.join(dir, "vision"), lookbookId, geometry: geometryText })));
-  const pick = (settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[]) => settled.flatMap((r) => (r.status === "fulfilled" ? [{ kit: clean(r.value.kit, spec).kit, promptVersion: r.value.promptVersion }] : []));
+  const pick = (settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[]) => settled.flatMap((r) => (r.status === "fulfilled" ? [{ kit: clean(r.value.kit, spec, /skeleton/.test(r.value.promptVersion) ? new Set(skelCovered) : undefined).kit, promptVersion: r.value.promptVersion }] : []));
   // Skeleton first: the layout of every sample post is already measured exactly from the PDF, so templates are BUILT from it for free.
   // The model is only asked for what geometry cannot give (decoration; templates that have no sample post to measure).
   const skel = stored || process.env.KIT_SKELETON === "0" ? null : await skeletonKit(spec, (id) => geoBy.get(id), logoBox && logoFurn ? { what: logoFurn.what, box: logoBox } : null).catch((e) => { warnings.push(`Skeleton skipped (${String(e.message).slice(0, 100)})`); return null; });
   const skelUsable = !!skel && skel.covered.length > 0;
+  if (skel) skelCovered.push(...skel.covered);
+  if (skel && process.env.SKEL_DEBUG) console.error("skeleton", JSON.stringify({ covered: skel.covered, missing: skel.missing, notes: skel.notes }));
+  if (skel) { // the sample shows copy lines the spec has no slot for: they become optional slots, so generation can fill them and nothing is lost
+    const added: string[] = [];
+    for (const [id, ex] of Object.entries(skel.extra)) { const a = spec.archetypes.find((x) => x.id === id); if (a) { a.slots.push(...ex); added.push(`${id}: ${ex.map((e) => e.name).join(", ")}`); } }
+    if (added.length) {
+      db().prepare("UPDATE lookbooks SET spec_json=? WHERE id=?").run(JSON.stringify(spec), lookbookId); await fs.writeFile(path.join(dir, "spec.json"), JSON.stringify(spec, null, 2)).catch(() => {});
+      warnings.push(`The look book's samples show text lines the style spec had no slot for. Added as optional slots: ${added.join("; ")}.`);
+    }
+  }
   if (skel) { repairs.push(`skeleton: ${skel.covered.length}/${spec.archetypes.length} templates built from the PDF's measured layout (no model call)${skel.notes.length ? "; " + skel.notes.join("; ") : ""}`); if (skelUsable) progress("kit", `Built ${skel.covered.length} of ${spec.archetypes.length} templates from the measured layout`); }
   let settled: PromiseSettledResult<{ kit: KitOutput; promptVersion: string }>[];
   if (stored) settled = [{ status: "fulfilled" as const, value: { kit: stored, promptVersion: "reused" } }];
@@ -309,7 +320,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       const oS = !mine && !exempt.align && !geoFor(spec.archetypes.find((x) => x.id === a.id)!) ? symmetricColumn(a.html, r.diag, spec, kinds, left) : { html: a.html, changes: [] as string[] }; a.html = oS.html;
       const o5 = !mine && usesGrid(a.html, grid) ? snapToRuledGrid(a.html, r.diag, kinds, grid) : { html: a.html, changes: [] as string[] }; a.html = o5.html;
       const o4 = mine ? skip() : balanceVertical(a.html, r.diag, spec, kinds, usesGrid(a.html, grid) ? grid.pitch : 0); a.html = o4.html;
-      const o2 = polishStamps(a.html, kinds); a.html = o2.html;
+      const o2 = mine ? skip() : polishStamps(a.html, kinds); a.html = o2.html;
       const o6 = dedupeFurniture(a.html, r.diag, kinds); a.html = nowrapPlaceholders(liftSlots(o6.html, kinds));
       const o7 = await enforceBackdropContrast(a.html, r.png, r.diag, spec, kinds); a.html = o7.html;
       const all = [...oR.changes, ...oS.changes, ...o0.changes, ...o1.changes, ...o3.changes, ...o5.changes, ...o4.changes, ...o2.changes, ...o6.changes, ...o7.changes]; n += all.length; if (all.length) alignLog.push(`polish ${a.id}: ${all.join(", ")}`);

@@ -126,7 +126,7 @@ export async function writeKit(kitDir: string, spec: StyleSpec, kit: KitOutput, 
     const html = /^\s*<\w+[^>]*\sdata-arch=/.test(html0) ? html0 : html0.replace(/^(\s*<\w+)/, `$1 data-arch="${a.id}"`);
     await fs.writeFile(path.join(kitDir, file), html);
     const sample: Record<string, string> = {};
-    for (const s of a.slots) sample[s.name] = k.sample_slots[s.name] ?? s.name.toUpperCase();
+    for (const s of a.slots) sample[s.name] = k.sample_slots[s.name] ?? (s.optional ? "" : s.name.toUpperCase()); // an optional slot with no sample renders empty, never as a placeholder word
     manifest.archetypes.push({ id: a.id, file, background_token: a.background_token, slots: a.slots.map((s) => ({ name: s.name, kind: s.kind, optional: s.optional, max_words: s.max_words, max_chars: s.max_chars })), sample_slots: sample });
   }
   await fs.writeFile(path.join(kitDir, "manifest.json"), JSON.stringify(manifest, null, 1));
