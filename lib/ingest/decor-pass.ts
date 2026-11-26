@@ -21,7 +21,7 @@ export async function decorPass(opts: { spec: StyleSpec; kit: KitOutput; images:
     `## Kit CSS (read-only; add through css_additions)\n\`\`\`css\n${kit.css}\n\`\`\``,
     `## Templates\n${kit.archetypes.map((a) => `### ${a.id} (background ${spec.archetypes.find((x) => x.id === a.id)?.background_token})\n\`\`\`html\n${a.html}\n\`\`\``).join("\n\n")}`,
   ].join("\n\n");
-  const ask = async (extra = "") => (await llmCall({ stage: opts.stage ?? "ingest.decor", tier: "kit_strong", system: prompt.body, user: user + extra, images: opts.images, schema: DecorOutput, lookbookId: opts.lookbookId, timeoutMs: 240000, maxOutTokens: 12000 })).data;
+  const ask = async (extra = "") => (await llmCall({ stage: opts.stage ?? "ingest.decor", tier: "kit_strong", system: prompt.body, user: user + extra, images: opts.images, schema: DecorOutput, lookbookId: opts.lookbookId, timeoutMs: 420000, maxOutTokens: 16000 })).data;
   const apply = (e: z.infer<typeof DecorOutput>): KitOutput => {
     const next: KitOutput = JSON.parse(JSON.stringify(kit));
     for (const a of e.archetypes) { const t = next.archetypes.find((x) => x.id === a.id); if (t) t.html = a.html; }

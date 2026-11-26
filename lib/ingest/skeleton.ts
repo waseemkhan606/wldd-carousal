@@ -190,9 +190,16 @@ function boxCss(b: SkBlock, spec: StyleSpec, bgHex: string): string {
   if (!multi && b.align === "left") width = Math.max(width, 1080 - 60 - b.x);
   if (!multi && b.align === "right") { left = 60; width = b.x + b.w - 60; }
   if (!multi && b.align === "center") { const half = Math.min(b.x + b.w / 2, 1080 - (b.x + b.w / 2)) - 60; left = b.x + b.w / 2 - half; width = half * 2; }
+  // the spec's safe margins hold for every slot and furniture box (a tilted stamp is positioned by its centre and left alone)
+  if (!b.rotationDeg) {
+    const m = spec.layout.margins_px, mg = typeof m === "number" ? { top: m, right: m, bottom: m, left: m } : m;
+    left = Math.max(left, mg.left); width = Math.max(Math.min(width, 1080 - mg.right - left), Math.min(b.w, 1080 - mg.right - left));
+  }
   const fr = fontRole(b.font, spec), bgc = nearestColor(b.boxed?.fill ?? bgHex, spec), fit = bestInk(b.visible ?? b.color, b.color, bgc.hex, spec);
+  const wt = b.weight && fr.weights.length ? fr.weights.reduce((p, q) => (Math.abs(q - b.weight!) < Math.abs(p - b.weight!) ? q : p)) : undefined; // only a weight the brand font really has
+  const bottomLimit = 1350 - (typeof spec.layout.margins_px === "number" ? spec.layout.margins_px : spec.layout.margins_px.bottom), hMax = Math.max(pitch * b.lines.length, b.maxH), h = b.rotationDeg ? hMax : Math.max(pitch * b.lines.length, Math.min(hMax, bottomLimit - Math.max(top, 0)));
   const colour = fit.alpha < 100 ? `color-mix(in srgb, var(${colorVar(fit.token)}) ${fit.alpha}%, transparent)` : `var(${colorVar(fit.token)})`;
-  return `position:absolute;left:${r(left)}px;top:${r(top)}px;width:${r(width)}px;height:${r(Math.max(b.maxH, pitch * b.lines.length))}px;font-family:var(${fontVar(fr.role)});${b.weight && b.weight !== 400 ? `font-weight:${b.weight};` : ""}font-size:${b.px}px;line-height:${lh.toFixed(3)};color:${colour};text-align:${b.align === "single" ? "left" : b.align};${b.upper ? "text-transform:uppercase;" : ""}${b.tracked ? "letter-spacing:.14em;" : ""}${b.rotationDeg ? `transform:rotate(${b.rotationDeg}deg);white-space:nowrap;` : ""}`;
+  return `position:absolute;left:${r(left)}px;top:${r(top)}px;width:${r(width)}px;height:${r(h)}px;font-family:var(${fontVar(fr.role)});${wt && wt !== 400 ? `font-weight:${wt};` : ""}font-size:${b.px}px;line-height:${lh.toFixed(3)};color:${colour};text-align:${b.align === "single" ? "left" : b.align};${b.upper ? "text-transform:uppercase;" : ""}${b.tracked ? "letter-spacing:.14em;" : ""}${b.rotationDeg ? `transform:rotate(${b.rotationDeg}deg);white-space:nowrap;` : ""}`;
 }
 
 const corner = (position: string) => ({ right: /right/i.test(position), bottom: /bottom|foot/i.test(position) });
@@ -200,6 +207,8 @@ const corner = (position: string) => ({ right: /right/i.test(position), bottom: 
 /** One archetype from its geometry and the spec's slots/furniture. Returns null (with a reason) when the geometry can't honour the spec. */
 export function skeletonForSpec(g: PageGeometry, spec: StyleSpec, a: SpecArch, visible: (b: SBlock) => string | undefined, logo?: { what: string; box: { x: number; y: number; w: number; h: number } } | null): { html: string; sample_slots: Record<string, string>; extra: SlotDef[] } | { fail: string } {
   const bgHex = spec.colors.find((c) => c.token === a.background_token)?.hex ?? "#FFFFFF";
+  const noFont = g.lines.filter((l) => !l.font).length;
+  if (g.lines.length && noFont / g.lines.length > 0.3) return { fail: `the PDF reader did not report fonts for ${noFont} of ${g.lines.length} text lines` };
   const all: SkBlock[] = classify(toBlocks(prepareLines(g)), g.shapes).map((b) => ({ ...b, visible: visible(b) }));
   const inLogo = (b: { x: number; y: number; w: number; h: number }) => !!logo && b.x >= logo.box.x - 14 && b.y >= logo.box.y - 14 && b.x + b.w <= logo.box.x + logo.box.w + 14 && b.y + b.h <= logo.box.y + logo.box.h + 14;
   const free = all.filter((b) => !inLogo(b)); // the real logo asset replaces whatever the PDF draws there

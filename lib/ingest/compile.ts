@@ -163,7 +163,7 @@ export async function compileKit(lookbookId: number, progress: Progress = () => 
       issues = allProblems(rendered);
     }
     if (!issues.length) break;
-    if (stored && !staticIssues.length) { warnings.push(...issues); break; } // reuse mode: no paid repair
+    if ((stored || /skeleton/.test(bestFrom)) && !staticIssues.length) { warnings.push(...issues); repairs.push(`constraints (kept, no model rewrite): ${issues.slice(0, 3).join(" | ").slice(0, 300)}`); break; } // reuse mode and skeleton kits: never replace measured templates with a model rewrite
     if (round === 1) { if (staticIssues.length) throw new Error(`Kit still violates constraints after one repair:\n${staticIssues.join("\n")}`); warnings.push(...issues); break; }
     progress("kit", `Repairing kit (${issues.length} constraint issues)`);
     repairs.push(`constraints: ${issues.length} issues: ${issues.slice(0, 3).join(" | ").slice(0, 300)}`);
