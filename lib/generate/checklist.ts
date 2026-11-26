@@ -87,11 +87,12 @@ async function evalGuideline(g: Guideline, e: Env): Promise<R> {
       return over.length ? { status: "fail", evidence: `${list(over)} has more than ${P.max} ${P.kind}`, slides: over } : { status: "pass", evidence: `No slide has more than ${P.max} ${P.kind}` };
     }
     case "slide_role": {
-      const targets = roleSlides(P.position, n), reqs = (P.requires ?? []) as { kind: string; text?: string }[], fails: string[] = [], notes: string[] = [];
+      const hasBg = (P.requires ?? []).some((q: any) => q.kind === "background"), targets = hasBg && P.position === "middle" ? Array.from({ length: Math.max(0, Number(P.to) - Number(P.from) + 1) }, (_, i) => Number(P.from) + i).filter((x) => x >= 1 && x < n) : roleSlides(P.position, n), reqs = (P.requires ?? []) as { kind: string; text?: string }[], fails: string[] = [], notes: string[] = [];
       if (!reqs.length) return { status: "pending", evidence: "Needs AI review" };
       for (const idx of targets) {
         const s = e.slides.find((x) => x.idx === idx); if (!s) continue; const slots = slotsOf(e, s);
         for (const r of reqs) {
+          if (r.kind === "background" && (r as any).hex) { const bg = e.bgHex(s); if (bg && dist(bg, (r as any).hex) > 40) fails.push(`slide ${idx} is not on ${r.text}`); else notes.push(`slide ${idx} on ${r.text}`); }
           if (r.kind === "question") { const h = slots.find((x) => x.kind === "headline") ?? slots.find((x) => x.kind !== "tag"); if (!h || !/[?？]/.test(h.text)) fails.push(`slide ${idx} headline isn't a question`); else notes.push(`slide ${idx}: “${plain(h.text)}”`); }
           if (r.kind === "stamp") { const st = slots.find((x) => x.kind === "stamp_text"); if (!st) fails.push(`slide ${idx}'s template has no stamp`); else if (!st.text.trim()) fails.push(`slide ${idx} has no stamp text`); else notes.push(`slide ${idx} stamp “${plain(st.text)}”`); }
           if (r.kind === "phrase") { const st = slots.find((x) => x.kind === "stamp_text"); if (st?.text.trim() && e.lang === "en" && !plain(st.text).toLowerCase().includes((r.text ?? "").toLowerCase())) fails.push(`slide ${idx} stamp should say “${r.text}”`); }

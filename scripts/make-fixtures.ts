@@ -165,6 +165,9 @@ function pages(t: Theme): string[] {
   ];
 }
 
+// a look book that states an explicit slide order: "Slide 4 is on black"
+themes.push({ ...themes[0], file: "Brutal Dev - order test - sample look book", rules: [...themes[0].rules.slice(0, 4), "Slide 4: the teardown on black · max 24 words a slide · one stamp per slide, max · no stock photos, no faces"] });
+
 async function main() {
   await fs.mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();

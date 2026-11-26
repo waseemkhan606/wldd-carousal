@@ -32,7 +32,7 @@ function classifyRule(atom: string, a: Anatomy): Pick<G, "category" | "scope" | 
   const total = a.carousel?.slides ?? 5;
   let m: RegExpExecArray | null;
   // "Slide 1: the hook question + a stamp" / "Slides 2–4: one number or idea each" / "Slide 5: the fix + "Save this" stamp"
-  if ((m = /^slides?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*:\s*(.+)$/i.exec(atom))) {
+  if ((m = /^slides?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*(?::|\bis\b|\bare\b|\bmust be\b|\balways\b)\s*(.+)$/i.exec(atom))) {
     const from = +m[1], to = m[2] ? +m[2] : from, body = m[3];
     const position = from === 1 && to === 1 ? "first" : from === total && to === total ? "last" : "middle";
     const requires: { kind: string; text?: string }[] = [];
@@ -40,6 +40,9 @@ function classifyRule(atom: string, a: Anatomy): Pick<G, "category" | "scope" | 
     const phrase = /["“”']([^"“”']{3,30})["“”']/.exec(body)?.[1];
     if (/\bstamp\b|\bseal\b|\bsticker\b/i.test(body)) requires.push({ kind: "stamp" });
     if (phrase) requires.push({ kind: "phrase", text: phrase });
+    // an explicit order: "Slide 3: the number on green", "Slide 2 is always paper"
+    const bgMention = [...(a.colours ?? [])].map((c) => ({ c, at: body.toLowerCase().search(new RegExp(`\\b(?:on|in|with)?\\s*${c.name.toLowerCase().split(/\s+/).pop()}\\b(?:\\s+(?:slide|background|bg|post|page))?`)) })).filter((x) => x.at >= 0 && /\b(?:on|in|with|bg|background|slide|post|page|is|are)\b/i.test(body)).sort((x, y) => x.at - y.at)[0];
+    if (bgMention && !/\bstamp\b/i.test(body.slice(Math.max(0, bgMention.at - 6), bgMention.at + 20))) requires.push({ kind: "background", text: bgMention.c.name, hex: bgMention.c.hex } as any);
     const roleOnly = /\bthe fix\b|\btakeaway\b|one (number|idea)/i.test(body);
     return { category: "structure", scope: "slide", method: requires.length ? "code" : "review", check: { type: "slide_role", params: { position, from, to, total, requires, text: body, role: roleOnly ? body : undefined } } };
   }

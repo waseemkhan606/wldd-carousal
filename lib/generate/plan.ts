@@ -65,7 +65,25 @@ export function planSequence(spec: StyleSpec, manifest: KitManifest, n: number, 
     for (let off = 0; off < alt.length; off++) { const hits = body.filter((_, k) => forToken(alt[(off + k) % alt.length])).length; if (hits > bestHits) { bestHits = hits; best = off; } }
     body.forEach((i, k) => { seq[i] = forToken(alt[(best + k) % alt.length]); });
   }
+  // explicit order stated by the look book ("Slide 3: the number on green"): written positions beat the generic rotation
+  for (const pb of positionalBackgrounds(spec)) {
+    const tok = spec.colors.find((c) => c.hex.toUpperCase() === pb.hex.toUpperCase())?.token; if (!tok) continue;
+    for (let idx = pb.from; idx <= pb.to; idx++) {
+      if (idx < 1 || idx > n || (idx === 1 && first) || (idx === n && last)) continue; // the cover and closer rules own those positions
+      const cands = manifest.archetypes.filter((a) => a.background_token === tok && a.id !== first && a.id !== last);
+      const insideIds = new Set(byPage(inside)), pick = cands.find((a) => insideIds.has(a.id)) ?? cands[0];
+      if (pick) seq[idx - 1] = pick.id;
+    }
+  }
   return seq;
+}
+
+/** Slides whose background the look book states by position (from the guideline register). */
+export function positionalBackgrounds(spec: StyleSpec): { from: number; to: number; hex: string; name: string; statement: string }[] {
+  return (spec.guidelines ?? []).filter((g) => g.enabled && g.check?.type === "slide_role").flatMap((g) => {
+    const P = g.check!.params as any, r = (P.requires ?? []).find((x: any) => x.kind === "background"); if (!r?.hex) return [];
+    return [{ from: Number(P.from), to: Number(P.to), hex: String(r.hex), name: String(r.text ?? ""), statement: g.statement }];
+  });
 }
 
 /** Requirements derived from machine-form rules, stated in plain words in the (variable) request. */
@@ -73,6 +91,7 @@ export function requirementsText(spec: StyleSpec, n: number, manifest?: KitManif
   if (single) return singleRequirements(single, manifest, wordCap(spec));
   const out: string[] = [];
   if (manifest) { const seq = planSequence(spec, manifest, n); if (seq.every(Boolean)) out.push(`Use exactly this archetype for each slide: ${seq.map((a, i) => `${i + 1}=${a}`).join(", ")}.`); else if (seq.some(Boolean)) out.push(`Fixed archetypes: ${seq.map((a, i) => (a ? `slide ${i + 1}=${a}` : null)).filter(Boolean).join(", ")}; choose the others.`); }
+  for (const pb of positionalBackgrounds(spec)) out.push(`Slide order from the look book: ${pb.statement}. ${pb.from === pb.to ? `Slide ${pb.from}` : `Slides ${pb.from} to ${pb.to}`} must use a template on ${pb.name}.`);
   for (const r of [...spec.sequencing, ...spec.rules.filter((x) => x.enabled)]) {
     const m = r.machine, prm = (m?.params ?? {}) as any;
     if (m?.type === "position_archetype") out.push(`Slide ${prm.position === "first" ? 1 : n} must use archetype "${prm.archetype_id}".`);

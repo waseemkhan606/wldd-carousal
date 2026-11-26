@@ -2,7 +2,7 @@
 import type { StyleSpec } from "../ingest/spec";
 import type { KitManifest } from "../ingest/kit";
 import type { CopyData, Lang, SlideCopy } from "../db/carousels";
-import { carouselOnly } from "./plan";
+import { carouselOnly, positionalBackgrounds } from "./plan";
 import { PLATFORM_IDS, PLATFORMS, type PlatformId } from "./platforms";
 
 export type Issue = { idx: number; platform: PlatformId | "both"; slot?: string; msg: string };
@@ -90,7 +90,8 @@ export function validateCopy(copy: CopyData, spec: StyleSpec, manifest: KitManif
   for (const r of single ? [] : rules) {
     const m = r.machine; if (m?.type !== "alternate_background") continue;
     const tokens: string[] = (m.params as any).tokens ?? [];
-    const body = copy.slides.filter((s) => !(s === first && firstRule) && !(s === last && lastRule));
+    const anchored = new Set(positionalBackgrounds(spec).flatMap((p) => Array.from({ length: Math.max(0, p.to - p.from + 1) }, (_, i) => p.from + i)));
+    const body = copy.slides.filter((s) => !(s === first && firstRule) && !(s === last && lastRule) && !anchored.has(s.idx));
     let prevPos = -1;
     for (const s of body) {
       const bg = bgOf(s.archetype);
@@ -105,11 +106,12 @@ export function validateCopy(copy: CopyData, spec: StyleSpec, manifest: KitManif
   for (const g of (spec.guidelines ?? []).filter((x) => x.enabled && x.method === "code" && !(single && carouselOnly(x)))) {
     const P = (g.check?.params ?? {}) as any;
     if (g.check?.type === "slide_role" && (P.requires ?? []).length) {
-      const idxs = P.position === "first" ? [1] : P.position === "last" ? [n] : Array.from({ length: Math.max(0, n - 2) }, (_, i) => i + 2);
+      const hasBg = (P.requires ?? []).some((q: any) => q.kind === "background"), idxs = hasBg && P.position === "middle" ? Array.from({ length: Math.max(0, Number(P.to) - Number(P.from) + 1) }, (_, i) => Number(P.from) + i).filter((x) => x >= 1 && x < n) : P.position === "first" ? [1] : P.position === "last" ? [n] : Array.from({ length: Math.max(0, n - 2) }, (_, i) => i + 2);
       for (const i of idxs) {
         const sl = copy.slides.find((x) => x.idx === i); const a = sl && arch.get(sl.archetype); if (!sl || !a) continue;
         const slots = slotsFor(sl, "instagram"), stamp = a.slots.find((x) => x.kind === "stamp_text"), head = a.slots.find((x) => x.kind === "headline") ?? a.slots.find((x) => x.kind !== "tag");
-        for (const r of P.requires as { kind: string; text?: string }[]) {
+        for (const r of P.requires as { kind: string; text?: string; hex?: string }[]) {
+          if (r.kind === "background" && r.hex) { const tok = spec.colors.find((c) => c.hex.toUpperCase() === r.hex!.toUpperCase())?.token, have = bgOf(sl.archetype); if (tok && have && have !== tok) add(i, "both", `look book: "${g.statement}". This slide must be on ${r.text}: use an archetype with that background`); }
           if (r.kind === "question" && head && !/[?？]/.test(slots[head.name] ?? "")) add(i, "both", `look book: "${g.statement}". The headline must be a hook question (end it with a question mark)`, head.name);
           if (r.kind === "stamp") { if (!stamp) add(i, "both", `look book: "${g.statement}", but archetype "${sl.archetype}" has no stamp slot: use an archetype that has one`); else if (!(slots[stamp.name] ?? "").trim()) add(i, "both", `look book: "${g.statement}". Fill the "${stamp.name}" slot with a short stamp`, stamp.name); }
           if (r.kind === "phrase" && stamp && lang === "en" && !plain(slots[stamp.name] ?? "").toLowerCase().includes((r.text ?? "").toLowerCase())) add(i, "both", `look book: "${g.statement}". The stamp must read “${r.text}”`, stamp.name);

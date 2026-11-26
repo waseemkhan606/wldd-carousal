@@ -123,3 +123,18 @@ describe("option slots come from the look book's lettered boxes", () => {
     expect(expandOptionSlots(spec, a)).toEqual([]); // idempotent
   });
 });
+
+import { planSequence, positionalBackgrounds } from "@/lib/generate/plan";
+describe("explicit slide order in the look book", () => {
+  it("reads 'Slide 4: the teardown on black' as a positional background and plans it", async () => {
+    const a = await analyseLookbook(fx("Brutal Dev - order test"));
+    const g = buildGuidelines(a), hit = g.find((x) => x.check?.type === "slide_role" && (x.check.params as any).requires?.some((r: any) => r.kind === "background"));
+    expect(hit?.check?.params).toMatchObject({ from: 4, to: 4 });
+    expect((hit!.check!.params as any).requires.find((r: any) => r.kind === "background").hex.toUpperCase()).toBe("#0A0A0A");
+    const spec: any = { guidelines: g.map((x, i) => ({ ...x, id: `g${i}`, enabled: true })), sequencing: [{ rule: "alt", machine: { type: "alternate_background", params: { tokens: ["white", "black"] } } }, { rule: "f", machine: { type: "position_archetype", params: { position: "first", archetype_id: "cover" } } }, { rule: "l", machine: { type: "position_archetype", params: { position: "last", archetype_id: "closer" } } }], rules: [], colors: [{ token: "white", hex: "#FAFAFA" }, { token: "black", hex: "#0A0A0A" }], lookbook: {}, archetypes: [] };
+    const mf: any = { archetypes: [{ id: "cover", background_token: "white" }, { id: "in-white", background_token: "white" }, { id: "in-black", background_token: "black" }, { id: "closer", background_token: "white" }] };
+    expect(positionalBackgrounds(spec).length).toBe(1);
+    const seq = planSequence(spec, mf, 5);
+    expect(seq[3]).toBe("in-black"); expect(seq[0]).toBe("cover"); expect(seq[4]).toBe("closer");
+  });
+});
