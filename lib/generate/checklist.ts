@@ -28,6 +28,13 @@ export type CheckItem = {
 };
 export type Checklist = { items: CheckItem[]; summary: { total: number; pass: number; fail: number; pending: number; info: number; na: number; followed: number; applicable: number }; reviewedAt?: string; stale: boolean };
 
+/** A stamp drawn as a separate coloured box behind its text: the colour is in the kit's CSS for the stamp-named classes, not on the text element. */
+function stampBoxUses(e: { spec: StyleSpec; css: string; html: (a: string) => string }, archetype: string, hex: string): boolean {
+  const tok = e.spec.colors.find((c) => c.hex.toUpperCase() === hex.toUpperCase())?.token; if (!tok) return false;
+  const classes = new Set([...e.html(archetype).matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(/\s+/)).filter((c) => /stamp|seal|sticker/i.test(c)));
+  return [...classes].some((c) => new RegExp(`\\.${c.replace(/[-]/g, "\\-")}[^{]*\\{[^}]*(?:background(?:-color)?|border(?:-color)?)\\s*:[^;}]*var\\(--c-${tok}\\)`).test(e.css));
+}
+
 type R = { status: Status; evidence: string; slides?: number[]; fix?: string };
 const hexOf = (css: string) => { const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css); return m ? "#" + [m[1], m[2], m[3]].map((v) => (+v).toString(16).padStart(2, "0")).join("").toUpperCase() : ""; };
 const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -134,7 +141,7 @@ async function evalGuideline(g: Guideline, e: Env): Promise<R> {
       const parts: string[] = []; let failed = "", passedAny = false, seenAny = false;
       if (kinds.length) {
         const ok: number[] = []; let seen = 0;
-        for (const s of e.slides) { const inf = e.info[s.idx]?.instagram; if (!inf) continue; for (const [name, sl] of Object.entries(inf.slots)) if (slotMatches(name, sl.kind, kinds) && (slotsFor(s, "instagram")[name] ?? "").trim() && !(e.bgHex(s) && contrastRatio(P.hex, e.bgHex(s)) < 2)) { seen++; const sbg = e.bgHex(s), byFill = sl.kind === "stamp_text" && ((sl.bg && dist(hexOf(sl.bg), P.hex) < 48 && dist(hexOf(sl.bg), sbg) > 30) || (sl.bd && dist(hexOf(sl.bd), P.hex) < 48)); if ((sl.color && dist(hexOf(sl.color), P.hex) < 48) || byFill) ok.push(s.idx); } }
+        for (const s of e.slides) { const inf = e.info[s.idx]?.instagram; if (!inf) continue; for (const [name, sl] of Object.entries(inf.slots)) if (slotMatches(name, sl.kind, kinds) && (slotsFor(s, "instagram")[name] ?? "").trim() && !(e.bgHex(s) && contrastRatio(P.hex, e.bgHex(s)) < 2)) { seen++; const sbg = e.bgHex(s), byFill = sl.kind === "stamp_text" && ((sl.bg && dist(hexOf(sl.bg), P.hex) < 48 && dist(hexOf(sl.bg), sbg) > 30) || (sl.bd && dist(hexOf(sl.bd), P.hex) < 48) || stampBoxUses(e, s.archetype, P.hex)); if ((sl.color && dist(hexOf(sl.color), P.hex) < 48) || byFill) ok.push(s.idx); } }
         if (seen) { seenAny = true; if (ok.length) { passedAny = true; parts.push(`${textRoles.filter((r) => kindsOf([r]).length).join(", ").toLowerCase()} on ${list([...new Set(ok)])}`); } else failed = `${P.name.toLowerCase()} is never used for ${textRoles.join(", ").toLowerCase()}`; }
       }
       if (bgRoles.length) {
