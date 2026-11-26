@@ -22,7 +22,6 @@ COPY . .
 RUN pnpm build
 
 ENV NODE_ENV=production
-VOLUME ["/data"]
 EXPOSE 3000
 # Railway injects PORT; locally it falls back to 3000
 CMD ["sh", "-c", "pnpm exec next start -H 0.0.0.0 -p ${PORT:-3000}"]
