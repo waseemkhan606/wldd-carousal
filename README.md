@@ -38,7 +38,7 @@ Runtime data (SQLite database, look books, templates, carousels, encrypted keys)
 
 The app needs a long-running Node process, a persistent disk, poppler and Chromium, so it ships as a Docker image (`Dockerfile`) with a `railway.json`.
 
-1. In Railway: **New Project → Deploy from GitHub repo** and pick this repository. Railway builds the `Dockerfile`.
+1. In Railway: **New Project → Deploy from GitHub repo** and pick this repository. Railway builds the `Dockerfile`, and every push to `main` redeploys automatically.
 2. **Add a Volume** to the service and mount it at `/data`. The database, look books and carousels live here, so without a volume everything is lost on every redeploy.
 3. **Variables:**
    - `APP_ACCESS_TOKEN`: the shared token that gates the whole app (choose a long random one);
